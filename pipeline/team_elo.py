@@ -24,15 +24,15 @@ ELO = 400 / np.log(10)        # logit -> Elo points
 GRID_K = [16, 24, 32]           # capped at 32: a higher K fits slightly better but lets one Worlds series move a team 100+
 SD_TEAM = 0.8                 # prior spread (logit units) of team strengths in the season fit
 # game weights: international events by name, then leagues by tier; events (cups) and EWC qualifiers
-# (event_major: an event with teams from major leagues, e.g. KeSPA Cup; event: the other events)
-WEIGHT = {"WLDs": 2.0, "MSI": 1.6, "FST": 1.3, "EWC": 1.3, "WSCI": 1.25, "major": 1.0, "tier2": 1.0, "tier3": 1.0,
+# (event_major: an event with teams from major or tier 1 leagues, e.g. KeSPA Cup; event: the other events)
+WEIGHT = {"WLDs": 2.0, "MSI": 1.6, "FST": 1.3, "EWC": 1.3, "WSCI": 1.25, "major": 1.0, "tier1": 1.0, "tier2": 1.0, "tier3": 1.0,
           "qualifier": 0.5, "event_major": 0.5, "EM": 0.25, "event": 0.25}
 # league levels in the season fit: prior mean (Elo points) per league, else by tier, and its spread
-TIER_PRIOR = {"major": 0, "tier2": -735, "tier3": -935}
+TIER_PRIOR = {"major": 0, "tier1": -270, "tier2": -735, "tier3": -935}
 LEAGUE_PRIOR = {"LCS": -100, "LCP": -220, "CBLOL": -320}
 SD_LEAGUE = 50
 # title bonus (Elo points) for winning a competition
-TITLE = {"WLDs": 150, "MSI": 100, "FST": 60, "EWC": 60, "WSCI": 40, "major": 50, "tier2": 30, "tier3": 20,
+TITLE = {"WLDs": 150, "MSI": 100, "FST": 60, "EWC": 60, "WSCI": 40, "major": 50, "tier1": 40, "tier2": 30, "tier3": 20,
          "qualifier": 0, "event_major": 15, "EM": 15, "event": 10}
 DECAY_GRACE, DECAY_HALF_LIFE = 14, 90     # days
 

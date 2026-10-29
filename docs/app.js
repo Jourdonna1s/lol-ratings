@@ -17,8 +17,8 @@ const f2=x=>x==null||isNaN(x)?'—':x.toFixed(2);
 const rc=x=>x>=1.15?'good':x<=0.9?'bad':'';
 const INTL='INTL',NAME=l=>(C.names||{})[l]||l,LN=L=>L=='all'?'All leagues':L=='major'?'Major leagues':L==INTL?'International':NAME(L);
 const COMB=L=>L=='all'||L=='major';   // the boards that combine leagues
-// tier of a league: Major / Tier 2 / Tier 3 / Event, shown as a small tag
-const TT=l=>({major:'Major',tier2:'Tier 2',tier3:'Tier 3',event:'Event'})[TIER[l]]||'';
+// tier of a league: Major / Tier 1 / Tier 2 / Tier 3 / Event, shown as a small tag
+const TT=l=>({major:'Major',tier1:'Tier 1',tier2:'Tier 2',tier3:'Tier 3',event:'Event'})[TIER[l]]||'';
 const tag=l=>TT(l)?` <span class="tag">${TT(l)}</span>`:'';
 const st={lg:LEAGUES.includes('LEC')?'LEC':LEAGUES[0],role:'all',split:'all',stage:'all',year:'all',plg:'all',all:0,pg:0,tsort:'elo',tall:0,tlg:'all',tpg:0};
 const yr=g=>g[F.date].slice(0,4),YEARS=D.years.map(String);
@@ -178,15 +178,15 @@ function notes(L){
 }
 const E=D.elo||{},EW=E.weights||{};
 const ELO_NOTE=`Elo: team strength from game results, counting the opponents’ strength. ${E.base||1500} is the average team; league levels come from the whole season’s games between leagues, so all teams share one scale. `
-  +'Each series (Bo1, Bo3 or Bo5) changes Elo once, at its last game. '+(EW.WLDs?`Series count by where they are played: Worlds ${EW.WLDs}×, MSI ${EW.MSI}×, First Stand and EWC ${EW.FST}×, WSCI ${EW.WSCI}×, leagues 1×, events with major-league teams (e.g. KeSPA Cup) and EWC qualifiers ${EW.event_major}×, EMEA Masters and other events ${EW.event}×. Winning a league split or event adds a title bonus.`:'')
+  +'Each series (Bo1, Bo3 or Bo5) changes Elo once, at its last game. '+(EW.WLDs?`Series count by where they are played: Worlds ${EW.WLDs}×, MSI ${EW.MSI}×, First Stand and EWC ${EW.FST}×, WSCI ${EW.WSCI}×, leagues 1×, events with major or tier 1 teams (e.g. KeSPA Cup) and EWC qualifiers ${EW.event_major}×, EMEA Masters and other events ${EW.event}×. Winning a league split or event adds a title bonus.`:'')
   +(E.decay?` A team’s Elo fades towards its league’s level after ${E.decay[0]} days without games (half every ${E.decay[1]} days).`:'');
 // Elo now (after decay, on the last day of the data), used when no split or stage is chosen
 const NOW=E.now||{},current=()=>st.split=='all'&&st.stage=='all'&&(st.year=='all'||st.year==YEARS[YEARS.length-1]);
 // titles per team: [competition, date, bonus]
 const TITLES={};(E.titles||[]).forEach(([ti,c,d,b])=>(TITLES[ti]=TITLES[ti]||[]).push([c,d,b]));
-// league options, grouped: combined boards, international, major, tier 2, tier 3, events
+// league options, grouped: combined boards, international, major, tier 1, tier 2, tier 3, events
 function groups(lgs){
-  const G=[['Combined',l=>COMB(l)],['International',l=>l==INTL],['Major',l=>TIER[l]=='major'],['Tier 2',l=>TIER[l]=='tier2'],['Tier 3',l=>TIER[l]=='tier3'],['Events',l=>EV.has(l)]];
+  const G=[['Combined',l=>COMB(l)],['International',l=>l==INTL],['Major',l=>TIER[l]=='major'],['Tier 1',l=>TIER[l]=='tier1'],['Tier 2',l=>TIER[l]=='tier2'],['Tier 3',l=>TIER[l]=='tier3'],['Events',l=>EV.has(l)]];
   return G.map(([t,f])=>[t,lgs.filter(f)]).filter(([,ls])=>ls.length);
 }
 // shared filter bar: one row of dropdowns (league, split/event, stage, year, and role on the player leaderboard)
