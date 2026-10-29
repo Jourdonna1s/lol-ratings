@@ -26,6 +26,7 @@ from itertools import combinations
 import numpy as np
 import pandas as pd
 import rating_core as rc
+import team_elo
 
 # ================= CONFIG =================
 FILE = "2026_LoL_esports_match_data_from_OraclesElixir.csv"
@@ -71,8 +72,15 @@ OUT_DIR = "../docs/data"
 GAME_FIELDS = ["player", "role", "team", "date", "league", "kind", "stage", "period", "split", "opponent", "champion",
                "result", "minutes", "kills", "deaths", "assists", "gd15", "r_early", "r_late", "r_overall"]
 SUMMARY_FIELDS = ["player", "league", "kind", "period", "split", "stage",
-                  "games", "n", "sw", "swd", "sw2", "s1", "s2", "first", "last", "team"]
+                  "games", "n", "sw", "swd", "sw2", "s1", "s2", "first", "last", "team", "ti"]
 PLAYER_FIELDS = ["name", "role", "team", "league", "games", "files"]
+# team-games (one row per team per game, partial games included: records and Elo use every game)
+TEAM_FIELDS = ["team", "ti", "date", "league", "kind", "stage", "period", "split", "opponent", "oi", "side", "result", "game",
+               "series", "s_result", "minutes", "kills", "deaths", "fb", "fd", "fh", "ft", "dragons", "grubs", "barons", "towers",
+               "inhibs", "gd15", "csd15", "xpd15", "dpm", "wpm", "vspm", "picks", "bans", "elo_before", "elo_after"]
+TEAM_SUMMARY_FIELDS = ["team", "league", "kind", "period", "split", "stage", "games", "wins", "s_won", "s_lost",
+                       "gd_n", "gd_sum", "blue_games", "blue_wins", "first", "last", "elo"]
+TEAM_INDEX_FIELDS = ["name", "league", "games", "files"]
 ROLES = ["top", "jng", "mid", "bot", "sup"]
 
 
@@ -264,6 +272,125 @@ def label_splits(games):
     return games
 
 
+def team_games(df, games, leagues, events):
+    """One row per team per game for the leagues, events and international events on the site (partial games included).
+    Split labels come from the player games of the same game; partial games use their own label."""
+    t = df[(df["position"] == "team") & df["league"].isin(leagues + events + INTERNATIONAL)].copy()
+    t = t[t.groupby("gameid")["gameid"].transform("size") == 2]
+    t["date"] = pd.to_datetime(t["date"])
+    t = t.sort_values(["date", "gameid", "side"], kind="stable").reset_index(drop=True)
+    qual = pd.Series(False, index=t.index)
+    for lg, f in QUALIFIERS.items():
+        m = t["league"] == lg
+        qual[m] = f(t[m])
+    t["kind"] = np.where(t["league"].isin(INTERNATIONAL) & ~qual, "international",
+                         np.where(t["league"].isin(EVENTS) | qual, "event", "domestic"))
+    lab = games.drop_duplicates("gameid").set_index("gameid")
+    have = t["gameid"].isin(lab.index)
+    own = t["split"].astype(object).where(~qual, "Qualifier")
+    t["split"] = t["gameid"].map(lab["split"]).where(have, own)
+    mapped = {lg for lg, _ in SPLIT_MAP}
+    t["period"] = t["gameid"].map(lab["period"]).where(have, [
+        SPLIT_MAP.get((lg, sp if pd.notna(sp) else None), sp) if lg in mapped else sp for lg, sp in zip(t["league"], own)])
+    t["stage"] = np.where(t["playoffs"] == 1, "playoffs", "regular")
+
+    # team identity: teamid, else the name
+    t["key"] = t["teamid"].where(t["teamid"].notna(), "name:" + t["teamname"].astype(str))
+    keys = list(dict.fromkeys(t["key"]))
+    t["ti"] = t["key"].map({k: i for i, k in enumerate(keys)})
+    other = t[["gameid", "ti", "teamname"]].rename(columns={"ti": "oi", "teamname": "opponent"})
+    t = t.merge(other, on="gameid")
+    t = t[t["ti"] != t["oi"]].sort_values(["date", "gameid", "side"], kind="stable").reset_index(drop=True)
+
+    # series: same league, same day, same two teams; the result is set on the team's last game of the series
+    day = t["date"].dt.strftime("%Y-%m-%d")
+    pair = [f"{min(a, b)}-{max(a, b)}" for a, b in zip(t["ti"], t["oi"])]
+    t["series"] = pd.factorize(pd.Series([f"{lg}|{d}|{p}" for lg, d, p in zip(t["league"], day, pair)]))[0]
+    sw = t.groupby(["series", "ti"])["result"].agg(["sum", "size"])
+    t["s_result"] = None
+    last = t.groupby(["series", "ti"]).tail(1).index
+    for i in last:
+        w, n = sw.loc[(t.at[i, "series"], t.at[i, "ti"])]
+        t.at[i, "s_result"] = 1 if w > n - w else 0 if w < n - w else None
+
+    # home league per team (for the Elo league level): its most played regular league, else its league here
+    home = home_leagues(df)
+    by_name = (df[(df["position"] == "team") & ~df["league"].isin(INTERNATIONAL + EVENTS)]
+               .groupby(["teamname", "league"])["gameid"].nunique().reset_index()
+               .sort_values("gameid", ascending=False).drop_duplicates("teamname").set_index("teamname")["league"])
+    t["home"] = [home.get(k) if not k.startswith("name:") else by_name.get(n) for k, n in zip(t["key"], t["teamname"])]
+    t["home"] = t["home"].where(t["home"].notna(), t["league"])
+
+    # Elo, one row per game (blue vs red)
+    b = t[t["side"] == "Blue"].set_index("gameid")
+    r = t[t["side"] == "Red"].set_index("gameid")
+    order = b.index[b.index.isin(r.index)]
+    g = pd.DataFrame({"blue": b.loc[order, "ti"].to_numpy(), "red": r.loc[order, "ti"].to_numpy(),
+                      "blue_lg": b.loc[order, "home"].to_numpy(), "red_lg": r.loc[order, "home"].to_numpy(),
+                      "blue_win": b.loc[order, "result"].to_numpy(dtype=float)}, index=order)
+    major_events = {lg for lg, c in t[t["kind"] == "event"].groupby("league") if any(tier_of(h) == "major" for h in c["home"])}
+    major_events -= set(QUALIFIERS)
+    # what a game counts for: international events by name, EM, other events, EWC qualifiers, leagues by tier
+    t["comp"] = np.where(t["kind"] == "international", t["league"],
+                         np.where(t["kind"] == "event", np.where(t["league"].isin(QUALIFIERS), "qualifier",
+                                                                 np.where(t["league"].isin(["EM", "WSCI"]), t["league"],
+                                                                          np.where(t["league"].isin(major_events), "event_major", "event"))),
+                                  t["league"].map(tier_of)))
+    cb = t.drop_duplicates("gameid").set_index("gameid").loc[order, "comp"]
+    g["weight"] = cb.map(team_elo.WEIGHT).to_numpy()
+    g["series"] = b.loc[order, "series"].to_numpy()
+    g["day"] = ((t.drop_duplicates("gameid").set_index("gameid").loc[order, "date"] - t["date"].min()).dt.total_seconds() / 86400).to_numpy()
+    prior = {lg: team_elo.prior_of(lg, tier_of(lg)) for lg in set(g["blue_lg"]) | set(g["red_lg"])}
+    # titles: the final of a finished competition = its last playoff series (its last series if it has no playoffs),
+    # when the winner took 3 games (a best of 5) and won at least half its games in the competition (not a relegation match)
+    pos = pd.Series(np.arange(len(order)), index=order)
+    end = t["date"].max()
+    titles, title_list = {}, []
+    for (lg, kind, sp), c in t.assign(sp=t["split"].astype(object).fillna("None").astype(str)).groupby(["league", "kind", "sp"], sort=False, dropna=False):
+        if c["comp"].iloc[0] == "qualifier" or c["date"].max() > end - pd.Timedelta(days=2):
+            continue
+        po = c[c["stage"] == "playoffs"]
+        fin = c[c["series"] == (po if len(po) else c).sort_values(["date", "series"]).iloc[-1]["series"]]
+        wins = fin.groupby("ti")["result"].sum()
+        champ = wins.idxmax()
+        if wins.max() != 3 or c.loc[c["ti"] == champ, "result"].mean() < 0.5:
+            continue
+        bonus = team_elo.TITLE[c["comp"].iloc[0]]
+        titles.setdefault(pos[fin["gameid"].iloc[-1]], []).append((champ, bonus))
+        title_list.append([int(champ), lg if kind == "international" else f"{lg} {sp}" if sp != "None" else lg,
+                           fin["date"].iloc[-1].strftime("%Y-%m-%d"), bonus])
+    rb, rr, after_b, after_r, k, rep, now = team_elo.fit(g, prior, titles)
+    rep["titles"] = title_list
+    # Elo now: after decay up to the last day in the file
+    end_day = (end - t["date"].min()).total_seconds() / 86400
+    homes = t.drop_duplicates("ti").set_index("ti")["home"]
+    rep["now"] = {int(i): round(now(i, h, end_day)) for i, h in homes.items()}
+    rep["as_of"] = end.strftime("%Y-%m-%d")
+    eb = pd.Series(rb, index=order), pd.Series(after_b, index=order)
+    er = pd.Series(rr, index=order), pd.Series(after_r, index=order)
+    blue = (t["side"] == "Blue").to_numpy()
+    t["elo_before"] = np.where(blue, t["gameid"].map(eb[0]), t["gameid"].map(er[0])).round(0)
+    t["elo_after"] = np.where(blue, t["gameid"].map(eb[1]), t["gameid"].map(er[1])).round(0)
+
+    def n(c):
+        return pd.to_numeric(t[c], errors="coerce") if c in t.columns else np.nan
+    out = pd.DataFrame({
+        "team": t["teamname"], "ti": t["ti"], "date": t["date"], "league": t["league"], "kind": t["kind"],
+        "stage": t["stage"], "period": t["period"], "split": t["split"], "opponent": t["opponent"], "oi": t["oi"],
+        "side": t["side"], "result": t["result"].astype(int), "game": t["game"], "series": t["series"], "s_result": t["s_result"],
+        "minutes": (n("gamelength") / 60).round(1), "kills": n("kills"), "deaths": n("deaths"),
+        "fb": n("firstblood"), "fd": n("firstdragon"), "fh": n("firstherald"), "ft": n("firsttower"),
+        "dragons": n("dragons"), "grubs": n("void_grubs"), "barons": n("barons"), "towers": n("towers"), "inhibs": n("inhibitors"),
+        "gd15": n("golddiffat15").round(0), "csd15": n("csdiffat15").round(0), "xpd15": n("xpdiffat15").round(0),
+        "dpm": n("dpm").round(0), "wpm": n("wpm").round(2), "vspm": n("vspm").round(2),
+        "picks": [[x for x in row if isinstance(x, str)] for row in t[[f"pick{i}" for i in range(1, 6)]].to_numpy()],
+        "bans": [[x for x in row if isinstance(x, str)] for row in t[[f"ban{i}" for i in range(1, 6)]].to_numpy()],
+        "elo_before": t["elo_before"], "elo_after": t["elo_after"], "year": t["date"].dt.year, "gameid": t["gameid"],
+        "home": t["home"],
+    })
+    return out, keys, rep
+
+
 def player_keys(games):
     """Which rows are the same player. The same name + role is one player, unless that name has several Oracle's
     Elixir playerids that never played for the same team (then they are different people). Duplicate ids of one
@@ -354,6 +481,17 @@ def report(table, games, rated, cfg):
     print(pd.DataFrame(rows).round(3).to_string(index=False), "\n")
 
 
+def team_report(tg, rep):
+    print("league levels (Elo points above the average team):", rep["league_levels"])
+    last = tg.groupby("ti").tail(1)
+    print("top 15 teams by Elo after their last game:")
+    print(last.sort_values("elo_after", ascending=False).head(15)[["team", "home", "elo_after", "date"]].to_string(index=False))
+    for lg in TIERS["major"]:
+        x = last[last["home"] == lg].sort_values("elo_after", ascending=False).head(3)
+        print(f"  {lg}: " + ", ".join(f"{a} {int(e)}" for a, e in zip(x["team"], x["elo_after"])))
+    print()
+
+
 def split_table(games):
     """One line per league: its split names (with the common name for major leagues), games and dates."""
     g = games.drop_duplicates(["gameid", "league"])
@@ -376,9 +514,12 @@ def dump(path, obj):
         json.dump(obj, f, ensure_ascii=False, default=str, separators=(",", ":"))
 
 
-def write_site_data(games, c_by_role, cfg, out_dir, leagues, complete):
-    """Writes index.json, summary/<year>.json and games/<year>/<league>.json (see the module docstring)."""
-    g_out = games[GAME_FIELDS + ["year", "playerid"]].copy()
+def write_site_data(games, c_by_role, cfg, out_dir, leagues, complete, tg, team_keys, elo_report):
+    """Writes index.json, summary/<year>.json, games/<year>/<league>.json and teams/<year>/<league>.json."""
+    g_out = games[GAME_FIELDS + ["year", "playerid", "gameid"]].copy()
+    # which team (index into the team list) each player-game belongs to
+    ti_of = dict(zip(zip(tg["gameid"], tg["team"]), tg["ti"]))
+    g_out["ti"] = [ti_of.get(k, -1) for k in zip(g_out["gameid"], g_out["team"])]
     g_out["date"] = g_out["date"].dt.strftime("%Y-%m-%d")
     for c in ["r_early", "r_late", "r_overall"]:
         g_out[c] = g_out[c].round(3)
@@ -398,6 +539,7 @@ def write_site_data(games, c_by_role, cfg, out_dir, leagues, complete):
     game_fields = GAME_FIELDS + ["pi"]
 
     years, files, pfiles = sorted(g_out["year"].unique().tolist()), {}, [[] for _ in players]
+    tfiles = [[] for _ in team_keys]
     for y in years:
         gy = g_out[g_out["year"] == y].reset_index(drop=True)
         gy["seq"] = np.arange(len(gy))                       # position in the year's date order, used to merge files
@@ -417,7 +559,7 @@ def write_site_data(games, c_by_role, cfg, out_dir, leagues, complete):
         wm = np.where(r.notna(), w, 0.0)
         gy = gy.assign(rated=r.notna().astype(int), wm=wm, wdev=wm * (r.fillna(1.0) - 1), w2=wm ** 2,
                        d1=(r - 1).fillna(0.0), d2=((r - 1) ** 2).fillna(0.0))
-        cell = ["pi", "league", "kind", "period", "split", "stage"]
+        cell = ["pi", "league", "kind", "period", "split", "stage", "ti"]
         s = gy.groupby(cell, sort=False, dropna=False).agg(games=("seq", "size"), n=("rated", "sum"), sw=("wm", "sum"), swd=("wdev", "sum"),
                                              sw2=("w2", "sum"), s1=("d1", "sum"), s2=("d2", "sum"),
                                              first=("seq", "min"), last=("seq", "max")).reset_index()
@@ -425,7 +567,29 @@ def write_site_data(games, c_by_role, cfg, out_dir, leagues, complete):
         # ratings have 3 decimals, so these roundings only drop float noise
         s = s.round({"sw": 3, "swd": 3, "sw2": 3, "s1": 3, "s2": 6})
         s = s.rename(columns={"pi": "player"}).sort_values("first")
-        dump(os.path.join(out_dir, "summary", f"{y}.json"), {"fields": SUMMARY_FIELDS, "rows": rows_of(s[SUMMARY_FIELDS])})
+
+        # teams: one file per league, and the team leaderboard sums per team x league x split x stage
+        ty = tg[tg["year"] == y].reset_index(drop=True)
+        ty["seq"] = np.arange(len(ty))
+        t_out = ty.assign(date=ty["date"].dt.strftime("%Y-%m-%d"))
+        for f in glob.glob(os.path.join(out_dir, "teams", str(y), "*.json")):
+            os.remove(f)
+        for lg, part in t_out.groupby("league", sort=False):
+            dump(os.path.join(out_dir, "teams", str(y), f"{lg}.json"),
+                 {"fields": TEAM_FIELDS, "rows": rows_of(part[TEAM_FIELDS]), "seq": part["seq"].tolist()})
+            for i in dict.fromkeys(part["ti"]):
+                tfiles[i].append(f"{y}/{lg}")
+        ty = ty.assign(gd_n=ty["gd15"].notna().astype(int), gd_sum=ty["gd15"].fillna(0),
+                       blue_games=(ty["side"] == "Blue").astype(int), blue_wins=((ty["side"] == "Blue") & (ty["result"] == 1)).astype(int),
+                       s_won=(ty["s_result"] == 1).astype(int), s_lost=(ty["s_result"] == 0).astype(int))
+        ts = ty.groupby(["ti", "league", "kind", "period", "split", "stage"], sort=False, dropna=False).agg(
+            games=("seq", "size"), wins=("result", "sum"), s_won=("s_won", "sum"), s_lost=("s_lost", "sum"),
+            gd_n=("gd_n", "sum"), gd_sum=("gd_sum", "sum"), blue_games=("blue_games", "sum"), blue_wins=("blue_wins", "sum"),
+            first=("seq", "min"), last=("seq", "max")).reset_index()
+        ts["elo"] = ty["elo_after"].to_numpy()[ts["last"].to_numpy()]
+        ts = ts.rename(columns={"ti": "team"}).sort_values("first")
+        dump(os.path.join(out_dir, "summary", f"{y}.json"), {"fields": SUMMARY_FIELDS, "rows": rows_of(s[SUMMARY_FIELDS]),
+                                                             "teams": {"fields": TEAM_SUMMARY_FIELDS, "rows": rows_of(ts[TEAM_SUMMARY_FIELDS])}})
 
     # player index: last team, league of the last domestic game (else last game), games, files
     last = g_out.groupby("pi").tail(1).set_index("pi")
@@ -433,6 +597,12 @@ def write_site_data(games, c_by_role, cfg, out_dir, leagues, complete):
     n_games = g_out.groupby("pi").size()
     prow = [[name, role, last.at[i, "team"], (last_dom if i in last_dom.index else last).at[i, "league"],
              int(n_games[i]), pfiles[i]] for i, (name, role, _) in enumerate(players)]
+
+    # team index: name, home league (if on the site, else the league it played most here), team-games, files
+    tl = tg.groupby("ti").agg(name=("team", "last"), home=("home", "first"), games=("ti", "size"),
+                              most=("league", lambda s: s.mode().iloc[0]))
+    trow = [[r["name"], r["home"] if r["home"] in leagues else r["most"], int(r["games"]), tfiles[i]]
+            for i, r in tl.reindex(range(len(team_keys))).iterrows()]
 
     for f in ["site_data.json"]:                              # the single-file layout from before
         if os.path.exists(os.path.join(out_dir, f)):
@@ -455,6 +625,11 @@ def write_site_data(games, c_by_role, cfg, out_dir, leagues, complete):
                    "late_weights": cfg["LATE_WEIGHTS"], "early_share": cfg["EARLY_SHARE"]},
         "years": years, "files": files, "game_fields": game_fields, "summary_fields": SUMMARY_FIELDS,
         "players": {"fields": PLAYER_FIELDS, "rows": prow},
+        "team_fields": TEAM_FIELDS, "team_summary_fields": TEAM_SUMMARY_FIELDS,
+        "teams": {"fields": TEAM_INDEX_FIELDS, "rows": trow},
+        "elo": {k: v for k, v in elo_report.items() if k != "league_levels"} | {"league_levels": elo_report["league_levels"],
+                "base": team_elo.BASE, "weights": team_elo.WEIGHT, "title_bonus": team_elo.TITLE,
+                "decay": [team_elo.DECAY_GRACE, team_elo.DECAY_HALF_LIFE]},
     })
 
 
@@ -477,13 +652,21 @@ def main(csv=FILE, out_dir=OUT_DIR, show_report=False):
         report(table, games, pd.concat([x for x in [dom, intl] if x is not None], ignore_index=True), cfg)
     t = df[df["position"] == "team"]
     complete = (t.drop_duplicates("gameid").groupby("league")["datacompleteness"].agg(lambda s: round(float((s == "complete").mean()), 2))).to_dict()
-    write_site_data(games, c_by_role, cfg, out_dir, leagues, complete)
+    events = [lg for lg in EVENTS if lg in set(games.loc[games["kind"] == "event", "league"])]
+    tg, team_keys, elo_report = team_games(df, games, leagues, events)
+    print(f"team Elo: {len(team_keys)} teams, {elo_report['games']} games in {elo_report['series']} series, K {elo_report['k']}, "
+          f"series winner predicted {elo_report['accuracy']:.1%} (better series win rate so far: {elo_report['baseline_accuracy']:.1%})")
+    if show_report:
+        team_report(tg, elo_report)
+    write_site_data(games, c_by_role, cfg, out_dir, leagues, complete, tg, team_keys, elo_report)
     sizes = {os.path.relpath(p, out_dir): os.path.getsize(p) / 1024
              for p in glob.glob(os.path.join(out_dir, "**", "*.json"), recursive=True)}
-    games_kb = [kb for p, kb in sizes.items() if p.startswith("games")]
-    for p in sorted(p for p in sizes if not p.startswith("games")):
+    for p in sorted(p for p in sizes if not p.startswith(("games", "teams"))):
         print(f"{p:26s} {sizes[p]:8.0f} KB")
-    print(f"{'games (' + str(len(games_kb)) + ' files)':26s} {sum(games_kb):8.0f} KB, largest {max(games_kb):.0f} KB")
+    for d in ["games", "teams"]:
+        kb = [v for p, v in sizes.items() if p.startswith(d)]
+        if kb:
+            print(f"{d + ' (' + str(len(kb)) + ' files)':26s} {sum(kb):8.0f} KB, largest {max(kb):.0f} KB")
     print(f"{'total':26s} {sum(sizes.values()):8.0f} KB   saved in: {os.path.abspath(out_dir)}")
     return games, table
 
