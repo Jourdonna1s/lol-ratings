@@ -121,9 +121,9 @@ function notes(L){
   if(part.length)s.push('Only games with full stats count ('+part.map(([l,v])=>`${l}: ${Math.round(v*100)}% of games`).join(', ')+').');
   return s.join(' ');
 }
-// league options, grouped: combined boards, major, tier 2, tier 3, events, international
+// league options, grouped: combined boards, international, major, tier 2, tier 3, events
 function groups(lgs){
-  const G=[['Combined',l=>COMB(l)],['Major',l=>TIER[l]=='major'],['Tier 2',l=>TIER[l]=='tier2'],['Tier 3',l=>TIER[l]=='tier3'],['Events',l=>EV.has(l)],['International',l=>l==INTL]];
+  const G=[['Combined',l=>COMB(l)],['International',l=>l==INTL],['Major',l=>TIER[l]=='major'],['Tier 2',l=>TIER[l]=='tier2'],['Tier 3',l=>TIER[l]=='tier3'],['Events',l=>EV.has(l)]];
   return G.map(([t,f])=>[t,lgs.filter(f)]).filter(([,ls])=>ls.length);
 }
 // shared filter bar: one row of dropdowns (league, split/event, stage, year, and role on the leaderboard)
