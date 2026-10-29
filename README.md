@@ -19,16 +19,19 @@ Open http://localhost:8000 (double-clicking index.html will not work, the browse
        git push -u origin update-ratings
 
 ## Data files (docs/data/, generated)
-    index.json               config, years, list of game files, player and team index (search, which files each is in), Elo settings
+    index.json               config, years, list of game files, player and team index (search, which files each is in), Elo settings,
+                             tournaments (one per league split, event and international event) and qualification links
     summary/<year>.json      per player x team x league x split x stage: the sums behind the player leaderboards;
                              "teams": per team x league x split x stage: record, series, gold diff @15, Elo (team leaderboards)
     games/<year>/<lg>.json   every rated player-game of one league (loaded on player pages)
-    teams/<year>/<lg>.json   every team-game of one league, partial games included (loaded on team pages)
+    teams/<year>/<lg>.json   every team-game of one league, partial games included (loaded on team and tournament pages)
 
 ## Pages
     #home        main page: menu, top 5 players and teams
     #players     player leaderboards        #p-<player>-<role>   player page
     #teams       team leaderboards          #t-<team>            team page
+    #events      tournaments                #e-<name>-<year>     tournament page: format, stages (tables, places or results), champion,
+                                                                 qualified from (by region), top players, draft, records
 
 Team strength is an Elo rating (pipeline/team_elo.py): from game results only, a separate method from the player ratings.
 

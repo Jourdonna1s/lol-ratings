@@ -43,7 +43,14 @@ INTERNATIONAL = ["MSI", "WLDs", "FST", "EWC"]          # league codes of interna
 EVENTS = ["EM", "KeSPA Cup", "AM", "AC", "CCWS", "HW", "WSCI", "DCGI", "DCup", "WLRQ"]
 # regional qualifiers filed under an international league code: rated like EVENTS, shown as "<event> Qualifier"
 # EWC 2026: qualifiers Apr-Jun are playoffs=0, the main event in July is playoffs=1
-QUALIFIERS = {"EWC": lambda p: p["playoffs"] == 0}
+# Worlds: a region's own qualifier filed under WLDs (2026: the LPL qualifier of Sep 17-19) = the games before the
+# event's last break of 14+ days
+def before_last_gap(p, days=14):
+    d = pd.to_datetime(p["date"]).dt.normalize()
+    u = np.sort(d.unique())
+    gaps = np.where(np.diff(u) >= np.timedelta64(days, "D"))[0]
+    return d < u[gaps[-1] + 1] if len(gaps) else pd.Series(False, index=p.index)
+QUALIFIERS = {"EWC": lambda p: p["playoffs"] == 0, "WLDs": before_last_gap}
 # names shown on the site (codes not listed are shown as the code)
 LEAGUE_NAMES = {
     "LCKC": "LCK Challengers", "LAS": "LCK Academy Series", "NACL": "NA Challengers", "CD": "Circuito Desafiante", "PRM": "Prime League",
@@ -62,7 +69,74 @@ SPLIT_MAP = {
     ("LCK", "Cup"): "Winter", ("LCK", "Rounds 1-2"): "Spring", ("LCK", "Rounds 3-4"): "Summer",
     ("LPL", "Split 1"): "Winter", ("LPL", "Split 2"): "Spring", ("LPL", "Split 3"): "Summer",
     ("LCS", "Lock-In"): "Winter", ("LCS", "Spring"): "Spring", ("LCS", "Summer"): "Summer",
-    ("LCS", None): "Summer",   # unlabelled LCS games of Oct 5-13, right after LCS Summer
+    ("LCS", "Promotion"): None,   # the LCS Promotion tournament (see UNLABELLED): not a split, no common name
+}
+# unlabelled games of a major league that are their own tournament: league -> split name
+UNLABELLED = {"LCS": "Promotion"}   # LCS Oct 5-13, 2026: the LCS Promotion tournament (NA Challengers / LRN teams)
+# tournaments shown in another tier than their league's: (league, split) -> tier
+TOUR_TIERS = {("LCS", "Promotion"): "tier2"}
+# tournament formats (hand-written from Riot's announcements and press coverage; the data has no format or stage
+# information beyond a playoffs flag on league games). Key: (year, league, split or None).
+# stages: name, type ("table": standings make sense, e.g. a round robin or Swiss; "bracket": series in order),
+# which games: {"flag": "regular"/"playoffs"} (the data's playoffs flag) or {"from": "MM-DD", "to": "MM-DD"} (dates).
+# Tournaments not listed get stages from the data: regular season + playoffs, or one list of results.
+def _st(name, kind, desc, **games):
+    return {"name": name, "type": kind, "desc": desc, **games}
+_LEAGUE = [_st("Regular season", "table", "", flag="regular"), _st("Playoffs", "bracket", "", flag="playoffs")]
+def _lg(regular, playoffs):
+    return [_st("Regular season", "table", regular, flag="regular"), _st("Playoffs", "bracket", playoffs, flag="playoffs")]
+FORMATS = {
+    (2026, "FST", None): {"about": "8 teams: the winners of the LCK, LPL, LEC, LCS, LCP and CBLOL opening tournaments, plus a second LCK and LPL team. Every series is a best of 5 with Fearless Draft.",
+                          "stages": [_st("Group stage", "bracket", "Two groups of four, double elimination (GSL style); two teams of each group go through.", **{"from": "03-16", "to": "03-20"}),
+                                     _st("Knockout stage", "bracket", "Semifinals and final, single elimination.", **{"from": "03-21", "to": "03-22"})]},
+    (2026, "MSI", None): {"about": "11 teams. Every series is a best of 5 with Fearless Draft.",
+                          "stages": [_st("Play-In", "bracket", "Four teams, double elimination; one goes through to the Bracket Stage.", **{"from": "06-28", "to": "07-01"}),
+                                     _st("Bracket Stage", "bracket", "Eight teams, double elimination.", **{"from": "07-02", "to": "07-12"})]},
+    (2026, "EWC", None): {"about": "16 teams at the Esports World Cup.",
+                          "stages": [_st("Group stage", "bracket", "Four groups of four, double elimination: opening matches best of 1, deciding matches best of 3. The top two of each group go through.", **{"from": "07-15", "to": "07-16"}),
+                                     _st("Playoffs", "bracket", "Eight teams, single elimination, best of 3; the final is a best of 5.", **{"from": "07-17", "to": "07-19"})]},
+    (2026, "EWC", "Qualifier"): {"about": "Regional qualifiers for the Esports World Cup, filed under EWC in the data. Not part of the main event.",
+                                 "stages": [_st("Qualifier matches", "bracket", "", **{"from": "01-01", "to": "12-31"})]},
+    (2026, "WLDs", "Qualifier"): {"about": "The LPL's own qualifier for its last Worlds spots, filed under Worlds in the data. Not part of the Worlds event (no Play-In).",
+                                  "stages": [_st("Qualifier matches", "bracket", "Best of 5.", **{"from": "01-01", "to": "12-31"})]},
+    (2026, "WLDs", None): {"about": "Three stages: Play-In, Swiss Stage and Knockout Stage.",
+                           "stages": [_st("Play-In", "bracket", "Four teams, double elimination, best of 5; one goes through to the Swiss Stage.", **{"from": "10-01", "to": "10-19"}),
+                                      _st("Swiss Stage", "table", "16 teams, paired by record; 3 wins go through, 3 losses are out. Best of 1, except best of 3 when a team can go through or be eliminated.", **{"from": "10-20", "to": "10-31"}),
+                                      _st("Knockout Stage", "bracket", "Eight teams, single elimination, best of 5 with Fearless Draft.", **{"from": "11-01", "to": "12-31"})]},
+    (2026, "LEC", "Versus"): {"about": "12 teams (the 10 LEC teams plus two ERL invitees). The winner goes to First Stand.",
+                              "stages": _lg("Single round robin, best of 1.", "Playoff bracket; the last rounds are best of 5.")},
+    (2026, "LEC", "Spring"): {"about": "10 teams. The top two go to MSI.", "stages": _lg("Single round robin, best of 3; the top six go to the playoffs.", "Double elimination, best of 5.")},
+    (2026, "LEC", "Summer"): {"about": "10 teams. The top three go to Worlds.", "stages": _lg("Single round robin, best of 3; the top six go to the playoffs.", "Double elimination, best of 5.")},
+    (2026, "LCK", "Cup"): {"about": "10 teams, Fearless Draft. The winner goes to First Stand.",
+                           "stages": [_st("Group stage", "table", "Two groups; teams play the other group's teams.", **{"from": "01-14", "to": "02-01"}),
+                                      _st("Play-In", "bracket", "", **{"from": "02-02", "to": "02-10"}),
+                                      _st("Playoffs", "bracket", "Double elimination, best of 5.", **{"from": "02-11", "to": "03-01"})]},
+    (2026, "LCK", "Rounds 1-2"): {"about": "10 teams. After Rounds 1-2 the top five form the Legend group and the bottom five the Rise group for Rounds 3-4.",
+                                  "stages": _lg("Double round robin, best of 3.", "Playoffs for the MSI spots.")},
+    (2026, "LCK", "Rounds 3-4"): {"about": "Rounds 3-4 in the Legend and Rise groups (results carry over), then the Season Play-In and Season Playoffs, with Fearless Draft. The top three go to Worlds.",
+                                  "stages": _lg("Rounds 3-4: double round robin, best of 3, in the Legend and Rise groups (the table mixes both groups).", "Season Play-In and Season Playoffs: double elimination, best of 5.")},
+    (2026, "LPL", "Split 1"): {"about": "14 teams in three groups (Ascend, Perseverance, Nirvana). The top two go to First Stand.",
+                               "stages": _lg("Double round robin in each group, best of 3 (the table mixes the groups).", "Play-In, then an eight-team double-elimination bracket, best of 5.")},
+    (2026, "LPL", "Split 2"): {"about": "14 teams in two groups. The top two go to MSI.", "stages": _lg("Regular season in two groups, best of 3 (the table mixes the groups).", "Playoffs, best of 5.")},
+    (2026, "LPL", "Split 3"): {"about": "12 teams. The winner is the LPL season champion.", "stages": _lg("Regular season, best of 3.", "Playoffs, best of 5.")},
+    (2026, "LCS", "Lock-In"): {"about": "8 teams, Fearless Draft. The winner goes to First Stand.",
+                               "stages": [_st("Swiss stage", "table", "Best of 3, paired by record.", **{"from": "01-24", "to": "02-10"}),
+                                          _st("Playoffs", "bracket", "", **{"from": "02-11", "to": "03-02"})]},
+    (2026, "LCS", "Spring"): {"about": "8 teams. The top two go to MSI.", "stages": _lg("Round robin, best of 3; the top six go to the playoffs.", "Double elimination, best of 5.")},
+    (2026, "LCS", "Summer"): {"about": "8 teams. The top three go to Worlds.",
+                              "stages": _lg("Round robin, best of 3; the top six go to the playoffs.", "Double elimination with a lower-bracket gauntlet, best of 5.")},
+    (2026, "LCS", "Promotion"): {"about": "The LCS Promotion Tournament for the LCS guest slot in 2027: Disguised, the current guest team, against the top teams of NA Challengers and Liga Regional Norte. Hybrid, with LAN finals in Mexico City. The data files these games as LCS games without a split name.",
+                                 "stages": [_st("Bracket", "bracket", "Double elimination, best of 5, with a play-in.", **{"from": "01-01", "to": "12-31"})]},
+    (2026, "LCP", "Split 1"): {"about": "8 teams. The winner goes to First Stand.", "stages": _lg("Single round robin, best of 3.", "Knockout playoffs, best of 5.")},
+    (2026, "LCP", "Split 2"): {"about": "8 teams. The top two go to MSI.", "stages": _lg("Single round robin, best of 3.", "Knockout playoffs, best of 5.")},
+    (2026, "LCP", "Split 3"): {"about": "8 teams. The top three go to Worlds.",
+                               "stages": [_st("Swiss stage", "table", "Best of 3 and best of 5 series, paired by record.", **{"from": "07-25", "to": "08-01"}),
+                                          _st("Playoffs", "bracket", "", **{"from": "08-02", "to": "08-30"})]},
+    (2026, "CBLOL", "Cup"): {"about": "8 teams. The winner goes to First Stand.",
+                             "stages": [_st("Round robin", "table", "Single round robin, best of 1. The top four go to the playoffs, 5th to 8th to the entry phase.", **{"from": "01-17", "to": "02-01"}),
+                                        _st("Entry phase and playoffs", "bracket", "", **{"from": "02-02", "to": "03-01"})]},
+    (2026, "CBLOL", "Split 1"): {"about": "The winner goes to MSI.", "stages": _lg("Single round robin, best of 3, Fearless Draft.", "Playoffs with Fearless Draft.")},
+    (2026, "CBLOL", "Split 2"): {"about": "The top teams go to Worlds.", "stages": _lg("Single round robin, best of 3, Fearless Draft.", "Playoffs with Fearless Draft.")},
 }
 SPLIT_GAP_DAYS = 21    # unlabelled games: take the nearest labelled game's split within this many days
 OUT_DIR = "../docs/data"
@@ -79,6 +153,9 @@ TEAM_FIELDS = ["team", "ti", "date", "league", "kind", "stage", "period", "split
 TEAM_SUMMARY_FIELDS = ["team", "league", "kind", "period", "split", "stage", "games", "wins", "s_won", "s_lost",
                        "gd_n", "gd_sum", "blue_games", "blue_wins", "first", "last", "elo"]
 TEAM_INDEX_FIELDS = ["name", "league", "games", "files"]
+# tournaments: year, league, kind and split identify one (the same fields as on the game rows); champ/runner: team index
+TOUR_FIELDS = ["year", "league", "kind", "split", "period", "name", "first", "last", "teams", "series", "games", "champ", "runner",
+               "done", "final", "playoffs", "format", "stages", "places", "tier"]
 ROLES = ["top", "jng", "mid", "bot", "sup"]
 
 
@@ -234,6 +311,9 @@ def label_splits(games):
     Other leagues keep their own split names; their unlabelled games take the nearest labelled game's split
     (within SPLIT_GAP_DAYS), else a name from the schedule ("Split 1", ... or the months, e.g. "Feb-Mar")."""
     games["split"] = games["split"].astype(object)
+    # where the split name comes from: data, near (the nearest split), schedule (a league without split names in the
+    # data: Split 1, 2, ...) or months (leftover games of a league with split names, e.g. "Feb-Mar")
+    games["split_src"] = np.where(games["split"].notna(), "data", None)
     mapped = {lg for lg, _ in SPLIT_MAP}
     for lg in games.loc[(games["kind"] == "domestic") & ~games["league"].isin(mapped), "league"].unique():
         m = (games["league"] == lg).to_numpy()
@@ -253,6 +333,7 @@ def label_splits(games):
             if near.empty:
                 break
             fill.loc[near["index"]] = near["near"].to_numpy()
+            games.loc[near["index"], "split_src"] = "near"
             known = pd.concat([lab, pd.DataFrame({"date": unl.loc[fill.notna(), "date"], "split": fill[fill.notna()]})])
         rest = fill[fill.isna()].index
         if len(rest):
@@ -262,9 +343,16 @@ def label_splits(games):
                 if len(lab):   # a league with its own names: don't invent "Split 2" next to a real "Split 2"
                     a, z = d[idx].min(), d[idx].max()
                     fill.loc[idx] = a.strftime("%b") if a.month == z.month else f"{a:%b}-{z:%b}"
+                    games.loc[idx, "split_src"] = "months"   # leftover games next to named splits: no tournament
                 else:
                     fill.loc[idx] = f"Split {b + 1}"
+                    games.loc[idx, "split_src"] = "schedule"
         games.loc[unl.index, "split"] = fill
+    # major leagues: their unlabelled games get the name in UNLABELLED (LCS Oct 5-13: the LCS Promotion tournament)
+    for lg, name in UNLABELLED.items():
+        m = (games["league"] == lg) & games["split"].isna() & (games["kind"] == "domestic")
+        games.loc[m, "split"] = name
+        games.loc[m, "split_src"] = "near"
     games["period"] = [SPLIT_MAP.get((lg, sp if pd.notna(sp) else None), sp) if lg in mapped else sp
                        for lg, sp in zip(games["league"], games["split"])]
     return games
@@ -286,11 +374,15 @@ def team_games(df, games, leagues, events):
     lab = games.drop_duplicates("gameid").set_index("gameid")
     have = t["gameid"].isin(lab.index)
     own = t["split"].astype(object).where(~qual, "Qualifier")
+    for lg, name in UNLABELLED.items():             # as in label_splits: LCS Oct 5-13 -> LCS Promotion
+        own = own.where(~((t["league"] == lg) & own.isna()), name)
     t["split"] = t["gameid"].map(lab["split"]).where(have, own)
     mapped = {lg for lg, _ in SPLIT_MAP}
     t["period"] = t["gameid"].map(lab["period"]).where(have, [
         SPLIT_MAP.get((lg, sp if pd.notna(sp) else None), sp) if lg in mapped else sp for lg, sp in zip(t["league"], own)])
     t["stage"] = np.where(t["playoffs"] == 1, "playoffs", "regular")
+    src = t["gameid"].map(lab["split_src"]).where(have, np.where(own.notna(), "data", None))
+    t["tour"] = (t["kind"] != "domestic") | (t["split"].notna() & src.isin(["data", "near", "schedule"]))
 
     # team identity: teamid, else the name
     t["key"] = t["teamid"].where(t["teamid"].notna(), "name:" + t["teamname"].astype(str))
@@ -339,26 +431,21 @@ def team_games(df, games, leagues, events):
     g["series"] = b.loc[order, "series"].to_numpy()
     g["day"] = ((t.drop_duplicates("gameid").set_index("gameid").loc[order, "date"] - t["date"].min()).dt.total_seconds() / 86400).to_numpy()
     prior = {lg: team_elo.prior_of(lg, tier_of(lg)) for lg in set(g["blue_lg"]) | set(g["red_lg"])}
-    # titles: the final of a finished competition = its last playoff series (its last series if it has no playoffs),
-    # when the winner took 3 games (a best of 5) and won at least half its games in the competition (not a relegation match)
+    # titles: the champion of each finished competition (see finals()) gets a bonus after the final
     pos = pd.Series(np.arange(len(order)), index=order)
     end = t["date"].max()
+    fins = finals(t)
     titles, title_list = {}, []
-    for (lg, kind, sp), c in t.assign(sp=t["split"].astype(object).fillna("None").astype(str)).groupby(["league", "kind", "sp"], sort=False, dropna=False):
-        if c["comp"].iloc[0] == "qualifier" or c["date"].max() > end - pd.Timedelta(days=2):
+    for (y, lg, kind, sp), f in fins.items():
+        if f["champ"] is None:
             continue
-        po = c[c["stage"] == "playoffs"]
-        fin = c[c["series"] == (po if len(po) else c).sort_values(["date", "series"]).iloc[-1]["series"]]
-        wins = fin.groupby("ti")["result"].sum()
-        champ = wins.idxmax()
-        if wins.max() != 3 or c.loc[c["ti"] == champ, "result"].mean() < 0.5:
-            continue
-        bonus = team_elo.TITLE[c["comp"].iloc[0]]
-        titles.setdefault(pos[fin["gameid"].iloc[-1]], []).append((champ, bonus))
-        title_list.append([int(champ), lg if kind == "international" else f"{lg} {sp}" if sp != "None" else lg,
-                           fin["date"].iloc[-1].strftime("%Y-%m-%d"), bonus])
+        bonus = team_elo.TITLE[f["comp"]]
+        titles.setdefault(pos[f["gameid"]], []).append((f["champ"], bonus))
+        title_list.append([f["champ"], lg if kind == "international" else f"{lg} {sp}" if sp != "None" else lg,
+                           f["date"].strftime("%Y-%m-%d"), bonus])
     rb, rr, after_b, after_r, k, rep, now = team_elo.fit(g, prior, titles)
     rep["titles"] = title_list
+    rep["finals"] = fins
     # Elo now: after decay up to the last day in the file
     end_day = (end - t["date"].min()).total_seconds() / 86400
     homes = t.drop_duplicates("ti").set_index("ti")["home"]
@@ -384,9 +471,145 @@ def team_games(df, games, leagues, events):
         "picks": [[x for x in row if isinstance(x, str)] for row in t[[f"pick{i}" for i in range(1, 6)]].to_numpy()],
         "bans": [[x for x in row if isinstance(x, str)] for row in t[[f"ban{i}" for i in range(1, 6)]].to_numpy()],
         "elo_before": t["elo_before"], "elo_after": t["elo_after"], "year": t["date"].dt.year, "gameid": t["gameid"],
-        "home": t["home"],
+        "home": t["home"], "tour": t["tour"], "comp": t["comp"],
     })
     return out, keys, rep
+
+
+def finals(t):
+    """The final of each competition (year x league x kind x split): its last playoff series, its last series if it has
+    no playoffs. It has a champion when the competition ended more than 2 days before the end of the data, is not a
+    qualifier, and the winner of the final took 3 games (a best of 5) and won at least half its games in the competition
+    (not a relegation match). Returns {(year, league, kind, split): {champ, runner, gameid, date, done, comp}}."""
+    end = t["date"].max()
+    out = {}
+    keyed = t.assign(sp=t["split"].astype(object).fillna("None").astype(str), y=t["date"].dt.year)
+    for (y, lg, kind, sp), c in keyed.groupby(["y", "league", "kind", "sp"], sort=False, dropna=False):
+        po = c[c["stage"] == "playoffs"]
+        fin = c[c["series"] == (po if len(po) else c).sort_values(["date", "series"]).iloc[-1]["series"]]
+        wins = fin.groupby("ti")["result"].sum()
+        champ = wins.idxmax()
+        done = not c["date"].max() > end - pd.Timedelta(days=2)
+        ok = done and c["comp"].iloc[0] != "qualifier" and wins.max() == 3 and c.loc[c["ti"] == champ, "result"].mean() >= 0.5
+        other = [i for i in wins.index if i != champ]
+        out[(int(y), lg, kind, sp)] = {"champ": int(champ) if ok else None, "runner": int(other[0]) if ok and other else None,
+                                       "gameid": fin["gameid"].iloc[-1], "date": fin["date"].iloc[-1], "done": done,
+                                       "comp": c["comp"].iloc[0], "series": int(fin["series"].iloc[0])}
+    return out
+
+
+def tournaments(tg, fins):
+    """One row per tournament: a league split, an event (or one of its splits) or an international event. League games
+    without a split label in the data are in no tournament (e.g. LCS games of Oct 5-13, "TCL Oct"), except in a league
+    that has no split labels at all, whose splits are named from the schedule (LFL Split 1, 2, 3)."""
+    t = tg[tg["tour"]].assign(sp=tg["split"].astype(object).fillna("None").astype(str), y=tg["date"].dt.year)
+    rows = []
+    for (y, lg, kind, sp), c in t.groupby(["y", "league", "kind", "sp"], sort=False):
+        f = fins[(int(y), lg, kind, sp)]
+        name = LEAGUE_NAMES.get(lg, lg) + ("" if sp == "None" else " " + sp)
+        per = c["period"].dropna()
+        if kind == "domestic" and len(per) and per.iloc[0] != sp:
+            name += f" ({per.iloc[0]})"                       # major leagues: the common split name too
+        rows.append({"year": int(y), "league": lg, "kind": kind, "split": None if sp == "None" else sp, "name": name,
+                     "tier": TOUR_TIERS.get((lg, sp), tier_of(lg) if kind == "domestic" else None),
+                     "period": per.iloc[0] if len(per) else None,
+                     "first": c["date"].min().strftime("%Y-%m-%d"), "last": c["date"].max().strftime("%Y-%m-%d"),
+                     "teams": int(c["ti"].nunique()), "series": int(c["series"].nunique()), "games": int(c["gameid"].nunique()),
+                     "champ": f["champ"], "runner": f["runner"], "done": int(f["done"]),
+                     "final": f["series"] if f["champ"] is not None else None, "playoffs": int((c["stage"] == "playoffs").any()),
+                     **(fm := format_of(int(y), lg, kind, None if sp == "None" else sp, c)),
+                     "places": placings(c, f, fm["stages"])})
+    tours = pd.DataFrame(rows).sort_values(["first", "last", "name"], kind="stable").reset_index(drop=True)
+    return tours.astype({"champ": "Int64", "runner": "Int64", "final": "Int64"})
+
+
+def in_stage(g, c):
+    """Rows of c in stage g (the same rule as inStage() in docs/app.js)."""
+    m = pd.Series(True, index=c.index)
+    if g.get("flag"):
+        m &= c["stage"] == g["flag"]
+    if g.get("from"):
+        md = c["date"].dt.strftime("%m-%d")
+        m &= (md >= g["from"]) & (md <= g["to"])
+    return m
+
+
+def ordinal(n):
+    return f"{n}{'th' if 10 <= n % 100 <= 20 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
+
+
+def placings(c, f, stages):
+    """[[team, place]]: a finished tournament with a champion: 1st, 2nd, then the other teams by how late they went out
+    (teams out on the same day share a place, e.g. "3rd-4th"); only games up to the final count. A tournament still being
+    played: the stage each team reached. Else none."""
+    if not f["done"]:
+        out = []
+        for g in stages:
+            for ti in c.loc[in_stage(g, c), "ti"].unique():
+                out = [x for x in out if x[0] != int(ti)] + [[int(ti), g["name"]]]
+        return out if len(stages) > 1 else []
+    if f["champ"] is None:
+        return []
+    last = c[c["date"] <= f["date"]].groupby("ti")["date"].max().drop([f["champ"], f["runner"]], errors="ignore")
+    out, n = [[f["champ"], "1st"]] + ([[f["runner"], "2nd"]] if f["runner"] is not None else []), 3
+    for _, grp in sorted(last.groupby(last.dt.normalize()), key=lambda x: -x[0].value):
+        k = len(grp)
+        lab = ordinal(n) if k == 1 else f"{ordinal(n)}–{ordinal(n + k - 1)}"
+        out += [[int(ti), lab] for ti in grp.index]
+        n += k
+    return out
+
+
+def format_of(y, lg, kind, sp, c):
+    """The format text and stages of a tournament: from FORMATS, else from the data (league: regular season + playoffs,
+    or one table; events and international events: one list of results)."""
+    f = FORMATS.get((y, lg, sp))
+    if f:
+        return {"format": f["about"], "stages": f["stages"]}
+    if kind == "domestic":
+        both = (c["stage"] == "playoffs").any() and (c["stage"] == "regular").any()
+        return {"format": None, "stages": _LEAGUE if both else [_st("Season", "table", "")]}
+    return {"format": None, "stages": [_st("Results", "bracket", "")]}
+
+
+def tournament_links(tg, tours):
+    """Qualification paths, found from the teams that played both tournaments: [from, to, [teams]].
+    * International events and events: each team comes from the qualifier of the same event it played before (EWC
+      Qualifier -> EWC), else from the latest league split it played that was at least half played (by games) when
+      the event started.
+    * Finals stages of a league (EBL Finals, LES Final Four, VCS Finals): from the team's latest earlier split of that league.
+    A link is kept when some, but not all, of the earlier tournament's teams went on (a real selection)."""
+    t = tg[tg["tour"]].assign(sp=tg["split"].astype(object).fillna("None").astype(str), y=tg["date"].dt.year)
+    idx = {(r.year, r.league, r.kind, "None" if pd.isna(r.split) else r.split): i for i, r in tours.iterrows()}
+    t["tn"] = [idx[k] for k in zip(t["y"], t["league"], t["kind"], t["sp"])]
+    played = t.groupby("ti")["tn"].agg(lambda s: sorted(set(s)))
+    teams_of = t.groupby("tn")["ti"].agg(lambda s: set(s))
+    first = tours["first"]
+    days = t.drop_duplicates("gameid").groupby("tn")["date"].agg(lambda s: np.sort(s.to_numpy()))
+    half = lambda v, d: (days[v] < np.datetime64(d)).mean() >= 0.5   # tournament v had played half its games by day d
+    links = []
+    for u, U in tours.iterrows():
+        final_stage = U["kind"] == "domestic" and "final" in str(U["split"]).lower()
+        promo = U["kind"] == "domestic" and "promotion" in str(U["split"]).lower()
+        if U["kind"] == "domestic" and not (final_stage or promo):
+            continue
+        src = {}
+        for x in teams_of[u]:
+            before = [v for v in played[x] if first[v] < U["first"] and half(v, U["first"])]
+            if promo:
+                cand = [v for v in before if tours.at[v, "kind"] == "domestic"]
+            elif final_stage:
+                cand = [v for v in before if tours.at[v, "league"] == U["league"] and tours.at[v, "kind"] == "domestic"]
+            else:
+                cand = [v for v in before if U["kind"] == "international" and tours.at[v, "league"] == U["league"]
+                        and tours.at[v, "kind"] == "event"] or [v for v in before if tours.at[v, "kind"] == "domestic"]
+            if cand:
+                v = max(cand, key=lambda v: (first[v], tours.at[v, "last"]))
+                src.setdefault(v, []).append(int(x))
+        for v, xs in sorted(src.items()):
+            if 0 < len(xs) < len(teams_of[v]):
+                links.append([int(v), int(u), sorted(xs)])
+    return links
 
 
 def player_keys(games):
@@ -512,7 +735,7 @@ def dump(path, obj):
         json.dump(obj, f, ensure_ascii=False, default=str, separators=(",", ":"))
 
 
-def write_site_data(games, c_by_role, cfg, out_dir, leagues, complete, tg, team_keys, elo_report):
+def write_site_data(games, c_by_role, cfg, out_dir, leagues, complete, tg, team_keys, elo_report, tours, links):
     """Writes index.json, summary/<year>.json, games/<year>/<league>.json and teams/<year>/<league>.json."""
     g_out = games[GAME_FIELDS + ["year", "playerid", "gameid"]].copy()
     # which team (index into the team list) each player-game belongs to
@@ -625,7 +848,8 @@ def write_site_data(games, c_by_role, cfg, out_dir, leagues, complete, tg, team_
         "players": {"fields": PLAYER_FIELDS, "rows": prow},
         "team_fields": TEAM_FIELDS, "team_summary_fields": TEAM_SUMMARY_FIELDS,
         "teams": {"fields": TEAM_INDEX_FIELDS, "rows": trow},
-        "elo": {k: v for k, v in elo_report.items() if k != "league_levels"} | {"league_levels": elo_report["league_levels"],
+        "tournaments": {"fields": TOUR_FIELDS, "rows": rows_of(tours[TOUR_FIELDS])}, "tournament_links": links,
+        "elo": {k: v for k, v in elo_report.items() if k not in ("league_levels", "finals")} | {"league_levels": elo_report["league_levels"],
                 "base": team_elo.BASE, "weights": team_elo.WEIGHT, "title_bonus": team_elo.TITLE,
                 "decay": [team_elo.DECAY_GRACE, team_elo.DECAY_HALF_LIFE]},
     })
@@ -656,7 +880,10 @@ def main(csv=FILE, out_dir=OUT_DIR, show_report=False):
           f"series winner predicted {elo_report['accuracy']:.1%} (better series win rate so far: {elo_report['baseline_accuracy']:.1%})")
     if show_report:
         team_report(tg, elo_report)
-    write_site_data(games, c_by_role, cfg, out_dir, leagues, complete, tg, team_keys, elo_report)
+    tours = tournaments(tg, elo_report["finals"])
+    links = tournament_links(tg, tours)
+    print(f"tournaments: {len(tours)}, {int(tours['champ'].notna().sum())} with a champion, {len(links)} qualification links")
+    write_site_data(games, c_by_role, cfg, out_dir, leagues, complete, tg, team_keys, elo_report, tours, links)
     sizes = {os.path.relpath(p, out_dir): os.path.getsize(p) / 1024
              for p in glob.glob(os.path.join(out_dir, "**", "*.json"), recursive=True)}
     for p in sorted(p for p in sizes if not p.startswith(("games", "teams"))):
