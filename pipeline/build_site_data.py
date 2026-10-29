@@ -5,11 +5,13 @@ Builds the data the website reads (docs/data/), rating v0.2.
     python build_site_data.py --csv FILE --out DIR --report
 
 Design
-* Domestic games are rated against a baseline per group of leagues (BASELINE_GROUPS, per role);
-  international games against their own baseline. Every game is rated once and stored.
+* Every regular league in the file is rated against its own baseline (per role), except the leagues grouped
+  in BASELINE_GROUPS, which share one. International games are rated against their own baseline.
+  Cross-league events (EVENTS) and qualifiers (QUALIFIERS): each team against its home league's baseline.
+  Every game is rated once and stored.
 * A player's rating for any selection of games (same formula as rateSums() in docs/app.js):
       rating = 1 + c(role) * sum(w * (game_rating - 1)) / (sum(w) + K)
-  w = 1 for a domestic game, INTL_WEIGHT for an international one, c(role) a fixed spread constant.
+  w = 1, or INTL_WEIGHT for an international game; c(role) a fixed spread constant.
 * The site loads data in pieces:
       index.json              config, years, file list, player index (search + which files a player is in)
       summary/<year>.json     per player x league x split x stage: the sums the formula needs (leaderboards)
@@ -20,24 +22,39 @@ Needs rating_core.py and the Oracle's Elixir match-data CSV in this folder.
 """
 import argparse, glob, json, os
 from datetime import datetime
+from itertools import combinations
 import numpy as np
 import pandas as pd
 import rating_core as rc
 
 # ================= CONFIG =================
 FILE = "2026_LoL_esports_match_data_from_OraclesElixir.csv"
-BASELINE_GROUPS = {"main": ["LCK", "LPL", "LEC", "LCS"], "lcp": ["LCP"]}   # each group is rated against its OWN baseline
-LEAGUES = [lg for grp in BASELINE_GROUPS.values() for lg in grp]            # leagues shown on the site
+# leagues that share one baseline; every other league with enough games gets its own
+BASELINE_GROUPS = {"main": ["LCK", "LPL", "LEC", "LCS"], "lcp": ["LCP"]}
+MIN_BASELINE_GAMES = 30   # complete games a league needs for its own baseline (smaller leagues are left out)
+# league tiers shown on the site. Leagues not listed are tier 2.
+TIERS = {"major": ["LCK", "LPL", "LEC", "LCS", "LCP", "CBLOL"],
+         "tier3": ["LAS", "NL", "HC"]}
 INTERNATIONAL = ["MSI", "WLDs", "FST", "EWC"]          # league codes of international events
-# regional qualifiers filed under an international league code. They are shown on the site and count in the
-# overall rating (weight 1, rated against the team's home-league baseline), but not as international games.
+# cross-league events (teams from several leagues): each team is rated against its home league's baseline,
+# counted with weight 1, and not as international games. They get their own leaderboard on the site.
+EVENTS = ["EM", "KeSPA Cup", "AM", "AC", "CCWS", "HW", "WSCI", "DCGI", "DCup", "WLRQ"]
+# regional qualifiers filed under an international league code: rated like EVENTS, shown as "<event> Qualifier"
 # EWC 2026: qualifiers Apr-Jun are playoffs=0, the main event in July is playoffs=1
 QUALIFIERS = {"EWC": lambda p: p["playoffs"] == 0}
+# names shown on the site (codes not listed are shown as the code)
+LEAGUE_NAMES = {
+    "LCKC": "LCK Challengers", "LAS": "LCK Academy Series", "NACL": "NA Challengers", "CD": "Circuito Desafiante", "PRM": "Prime League",
+    "EBL": "Esports Balkan League", "ROL": "Road of Legends", "AL": "Arabian League", "RL": "Rift Legends",
+    "HM": "Hitpoint Masters", "LRN": "Liga Regional Norte", "LRS": "Liga Regional Sur",
+    "EM": "EMEA Masters", "WLDs": "Worlds", "EWC": "Esports World Cup", "FST": "First Stand",
+}
 K = 12                 # small-sample shrinkage (use the K_USE printed by the baseline-check notebook)
 INTL_WEIGHT = 2.0      # one international game counts as this many domestic games in the overall rating
 TARGET_SD = 0.15       # typical spread of player ratings inside a role
 MIN_GAMES_CALIBRATION = 15
-# common split names across regions (the region's own name is kept in the "split" field)
+# common split names for the major leagues (the region's own name is kept in the "split" field).
+# Other leagues keep their own split names.
 SPLIT_MAP = {
     ("LEC", "Versus"): "Winter", ("LEC", "Spring"): "Spring", ("LEC", "Summer"): "Summer",
     ("LCK", "Cup"): "Winter", ("LCK", "Rounds 1-2"): "Spring", ("LCK", "Rounds 3-4"): "Summer",
@@ -45,7 +62,10 @@ SPLIT_MAP = {
     ("LCS", "Lock-In"): "Winter", ("LCS", "Spring"): "Spring", ("LCS", "Summer"): "Summer",
     ("LCS", None): "Summer",   # unlabelled LCS games of Oct 5-13, right after LCS Summer
     ("LCP", "Split 1"): "Winter", ("LCP", "Split 2"): "Spring", ("LCP", "Split 3"): "Summer",
+    ("CBLOL", "Cup"): "Winter", ("CBLOL", "Split 1"): "Spring", ("CBLOL", "Split 2"): "Summer",
+    ("CBLOL", None): "Summer",  # unlabelled CBLOL games of Sep 28-Oct 12, at the end of Split 2
 }
+SPLIT_GAP_DAYS = 21    # unlabelled games: take the nearest labelled game's split within this many days
 OUT_DIR = "../docs/data"
 
 GAME_FIELDS = ["player", "role", "team", "date", "league", "kind", "stage", "period", "split", "opponent", "champion",
@@ -56,13 +76,56 @@ PLAYER_FIELDS = ["name", "role", "team", "league", "games", "files"]
 ROLES = ["top", "jng", "mid", "bot", "sup"]
 
 
+def tier_of(lg):
+    if lg in INTERNATIONAL: return "international"
+    if lg in EVENTS: return "event"
+    return next((t for t, lgs in TIERS.items() if lg in lgs), "tier2")
+
+
+def regular_leagues(df):
+    """Leagues with enough complete games for a baseline: major first (TIERS order), then by code."""
+    t = df[(df["position"] == "team") & (df["datacompleteness"] == "complete")]
+    n = t.groupby("league")["gameid"].nunique()
+    ok = [lg for lg in n.index if lg not in INTERNATIONAL and lg not in EVENTS and n[lg] >= MIN_BASELINE_GAMES]
+    small = sorted(lg for lg in n.index if lg not in INTERNATIONAL and lg not in EVENTS and n[lg] < MIN_BASELINE_GAMES)
+    if small:
+        print(f"leagues with fewer than {MIN_BASELINE_GAMES} complete games, left out:", small)
+    major = [lg for lg in TIERS["major"] if lg in ok]
+    return major + sorted((lg for lg in ok if lg not in major), key=str.lower)
+
+
+def baselines(leagues):
+    """Baseline name -> its leagues: the BASELINE_GROUPS, then every other league on its own."""
+    grouped = {lg for lgs in BASELINE_GROUPS.values() for lg in lgs}
+    return {**BASELINE_GROUPS, **{lg: [lg] for lg in leagues if lg not in grouped}}
+
+
+def home_leagues(df):
+    """teamid -> the regular league the team played most games in (from the whole CSV)."""
+    t = df[(df["position"] == "team") & ~df["league"].isin(INTERNATIONAL + EVENTS)]
+    n = t.groupby(["teamid", "league"])["gameid"].nunique().reset_index()
+    return n.sort_values("gameid", ascending=False).drop_duplicates("teamid").set_index("teamid")["league"].to_dict()
+
+
+def check_events(df, leagues):
+    """Warns about regular leagues whose teams mostly belong to other leagues (probably an event to list in EVENTS)."""
+    home = home_leagues(df)
+    t = df[(df["position"] == "team") & df["league"].isin(leagues)].drop_duplicates(["league", "teamid"])
+    away = (t["teamid"].map(home) != t["league"]).groupby(t["league"]).mean()
+    for lg in away[away > 0.5].index:
+        print(f"WARNING: most {lg} teams belong to other leagues. If it is a cup or tournament, add it to EVENTS.")
+    unlisted = [lg for lg in leagues if not any(lg in lgs for lgs in TIERS.values())]
+    print("tier 2 (not listed in TIERS):", ", ".join(unlisted))
+
+
 def rate_baselines(df, cfg):
-    """Rates domestic games per baseline group; international games and qualifiers each against their own baseline."""
+    """Rates every regular league against its baseline, international games against their own, and
+    events + qualifiers against each team's home-league baseline. Returns (domestic, international, events)."""
     counts = df[df["position"] != "team"].groupby("league")["gameid"].nunique().sort_values(ascending=False)
     print("All league codes in the file and their game counts:")
     print(counts.to_string(), "\n")
 
-    def pool(leagues, label, qualifiers=None):
+    def pool(leagues, label, qualifiers=None, quiet=False):
         """qualifiers=None: all games; False: without the QUALIFIERS games; True: only those."""
         parts = []
         for lg in leagues:
@@ -73,72 +136,74 @@ def rate_baselines(df, cfg):
             n = p["gameid"].nunique()
             if n < 10:
                 print(f"{label}: {lg} has only {n} complete games, skipped"); continue
-            parts.append(rc.add_raw_stats(p))
-            print(f"{label}: {lg} {n} games")
+            p = rc.add_raw_stats(p)
+            p["qualifier"] = bool(qualifiers)
+            parts.append(p)
+            if not quiet:
+                print(f"{label}: {lg} {n} games")
         return pd.concat(parts, ignore_index=True) if parts else None
 
+    leagues = regular_leagues(df)
+    check_events(df, leagues)
     parts, base_raw = [], {}
-    for name, lgs in BASELINE_GROUPS.items():
-        raw = pool(lgs, name)
-        if raw is None or raw["gameid"].nunique() < 30:
+    for name, lgs in baselines(leagues).items():
+        raw = pool(lgs, name, quiet=True)
+        if raw is None or raw["gameid"].nunique() < MIN_BASELINE_GAMES:
             print(f"{name}: not enough games for its own baseline, skipped")
             continue
-        base_raw[name] = raw.copy()                               # kept to rate qualifier games against
-        rated = rc.rate(raw, cfg)                                 # this group's own baseline
-        print(f"{name}: baseline built from {rated['gameid'].nunique()} games; stats skipped: {rated.attrs.get('skipped_stats')}")
+        base_raw[name] = raw.copy()                               # kept to rate event and qualifier games against
+        rated = rc.rate(raw, cfg)                                 # this baseline's own games
+        rated["baseline"] = name
+        skipped = rated.attrs.get("skipped_stats")
+        print(f"baseline {name}: {rated['gameid'].nunique()} games ({', '.join(lgs)})" + (f"; stats skipped: {skipped}" if skipped else ""))
         parts.append(rated)
     dom = pd.concat(parts, ignore_index=True)
     intl = pool(INTERNATIONAL, "international", qualifiers=False)
     if intl is not None and intl["gameid"].nunique() >= 30:
         intl = rc.rate(intl, cfg)                                 # separate international baseline
+        intl["baseline"] = "international"
         print("stats skipped in the international baseline:", intl.attrs.get("skipped_stats"))
     else:
         print("not enough international games, international ratings will be empty")
         intl = None
-    print("\nSplit labels per league (domestic), with playoffs flag:")
-    print(dom.groupby(["league", "split", "playoffs"])["gameid"].nunique().to_string())
-    qual = pool([lg for lg in INTERNATIONAL if lg in QUALIFIERS], "qualifiers", qualifiers=True)
-    if qual is not None:
-        qual = rate_qualifiers(df, qual, base_raw, pool, cfg)
-    return dom, intl, qual
+    cross = [x for x in [pool(EVENTS, "events"), pool([lg for lg in INTERNATIONAL if lg in QUALIFIERS], "qualifiers", qualifiers=True)]
+             if x is not None]
+    ev = rate_cross_league(df, pd.concat(cross, ignore_index=True), base_raw, cfg) if cross else None
+    if ev is not None:
+        ev.loc[ev["qualifier"], "split"] = "Qualifier"
+    return dom, intl, ev, leagues
 
 
-def home_leagues(df):
-    """teamid -> the non-international league the team played most games in (from the whole CSV)."""
-    t = df[(df["position"] == "team") & ~df["league"].isin(INTERNATIONAL)]
-    n = t.groupby(["teamid", "league"])["gameid"].nunique().reset_index()
-    return n.sort_values("gameid", ascending=False).drop_duplicates("teamid").set_index("teamid")["league"].to_dict()
-
-
-def rate_qualifiers(df, qual, base_raw, pool, cfg):
-    """Each qualifier player-game is rated against the baseline of the team's home league: the site's baseline
-    group if the league is on the site, else a baseline from that league's own games in the CSV.
-    The baselines are built from domestic games only, so the qualifier games don't change them.
-    A team with no home league in the file gets its opponent's (qualifiers are regional)."""
+def rate_cross_league(df, games, base_raw, cfg):
+    """Each event/qualifier player-game is rated against the baseline of the team's home league.
+    The baselines are built from league games only, so these games don't change them.
+    A team with no home league in the file gets its opponent's."""
     home = home_leagues(df)
-    qual = qual.copy()
-    qual["home"] = qual["teamid"].map(home)
-    opp_home = qual.groupby(["gameid", "teamname"])["home"].first()
-    for i in qual.index[qual["home"].isna()]:
-        other = opp_home.drop((qual.at[i, "gameid"], qual.at[i, "teamname"]), errors="ignore").loc[qual.at[i, "gameid"]]
-        qual.at[i, "home"] = other.dropna().iloc[0] if other.notna().any() else None
+    games = games.copy()
+    games["home"] = games["teamid"].map(home)
+    opp_home = games.groupby(["gameid", "teamname"])["home"].first()
+    for i in games.index[games["home"].isna()]:
+        other = opp_home.drop((games.at[i, "gameid"], games.at[i, "teamname"]), errors="ignore").loc[games.at[i, "gameid"]]
+        games.at[i, "home"] = other.dropna().iloc[0] if other.notna().any() else None
     group_of = {lg: name for name, lgs in BASELINE_GROUPS.items() for lg in lgs}
-    qual["baseline"] = [group_of.get(h, h) if isinstance(h, str) else None for h in qual["home"]]
+    games["baseline"] = [group_of.get(h, h) if isinstance(h, str) else None for h in games["home"]]
 
     parts = []
-    for key, q in qual.groupby("baseline", dropna=False):
+    for key, q in games.groupby("baseline", dropna=False):
         ref = base_raw.get(key) if isinstance(key, str) else None
-        if ref is None and isinstance(key, str):
-            ref = pool([key], f"qualifier baseline {key}")        # a league not on the site: its own games
-        if ref is None or ref["gameid"].nunique() < 30:
-            print(f"qualifiers: no baseline for {key} ({q['teamname'].unique().tolist()}), {len(q)} player-games skipped")
+        if ref is None:
+            print(f"events: no baseline for {key} ({', '.join(sorted(q['teamname'].unique()))}), {len(q)} player-games skipped")
             continue
         both = pd.concat([ref.assign(_ref=True), q.drop(columns=["home", "baseline"]).assign(_ref=False)], ignore_index=True)
         rated = rc.rate(both, cfg, ref=both["_ref"])
-        parts.append(rated[~rated["_ref"]].drop(columns="_ref"))
-        print(f"qualifiers: {q['gameid'].nunique()} games, {len(q)} player-games rated against the {key} baseline "
-              f"({ref['gameid'].nunique()} games): {', '.join(sorted(q['teamname'].unique()))}")
-    return pd.concat(parts, ignore_index=True) if parts else None
+        rated = rated[~rated["_ref"]].drop(columns="_ref")
+        rated["baseline"] = key
+        parts.append(rated)
+    out = pd.concat(parts, ignore_index=True) if parts else None
+    if out is not None:
+        n = out.groupby(["league", "baseline"])["gameid"].nunique().unstack(fill_value=0)
+        print("event games per home-league baseline:\n" + n.to_string())
+    return out
 
 
 def tidy(p, kind):
@@ -147,15 +212,81 @@ def tidy(p, kind):
         "player": p["playername"], "role": p["position"], "team": p["teamname"], "gameid": p["gameid"],
         "date": p["date"], "league": p["league"], "kind": kind,
         "stage": np.where(p["playoffs"] == 1, "playoffs", "regular"),
-        "split": "Qualifier" if kind == "qualifier" else p["split"],
+        "split": p["split"],
         "opponent": p["opponent"], "champion": p["champion"], "result": p["result"],
         "minutes": p["minutes"].round(1), "kills": p["kills"], "deaths": p["deaths"], "assists": p["assists"],
         "gd15": p["golddiffat15"],
         "r_early": p["r_early"], "r_late": p["r_late"], "r_overall": p["r_overall"],
+        "playerid": p["playerid"], "baseline": p["baseline"],
     })
-    out["period"] = [SPLIT_MAP.get((lg, sp if pd.notna(sp) else None), sp) for lg, sp in zip(out["league"], out["split"])]
     out["year"] = out["date"].dt.year
     return out
+
+
+def label_splits(games):
+    """period = the split name the site filters on. Major leagues: the common name from SPLIT_MAP.
+    Other leagues keep their own split names; their unlabelled games take the nearest labelled game's split
+    (within SPLIT_GAP_DAYS), else a name from the schedule ("Split 1", ... or the months, e.g. "Feb-Mar")."""
+    games["split"] = games["split"].astype(object)
+    mapped = {lg for lg, _ in SPLIT_MAP}
+    for lg in games.loc[(games["kind"] == "domestic") & ~games["league"].isin(mapped), "league"].unique():
+        m = (games["league"] == lg).to_numpy()
+        g = games.loc[m, ["date", "split"]]
+        lab, unl = g[g["split"].notna()], g[g["split"].isna()]
+        if unl.empty:
+            continue
+        fill = pd.Series(None, index=unl.index, dtype=object)
+        known = lab
+        while len(known):   # repeat, so a run of unlabelled games next to a split joins it
+            todo = unl.loc[fill[fill.isna()].index]
+            if todo.empty:
+                break
+            near = pd.merge_asof(todo.reset_index().sort_values("date"), known.sort_values("date").rename(columns={"split": "near"}),
+                                 on="date", direction="nearest", tolerance=pd.Timedelta(days=SPLIT_GAP_DAYS))
+            near = near[near["near"].notna()]
+            if near.empty:
+                break
+            fill.loc[near["index"]] = near["near"].to_numpy()
+            known = pd.concat([lab, pd.DataFrame({"date": unl.loc[fill.notna(), "date"], "split": fill[fill.notna()]})])
+        rest = fill[fill.isna()].index
+        if len(rest):
+            d = g.loc[rest, "date"].sort_values()
+            block = (d.diff() > pd.Timedelta(days=SPLIT_GAP_DAYS)).cumsum()
+            for b, idx in d.groupby(block).groups.items():
+                if len(lab):   # a league with its own names: don't invent "Split 2" next to a real "Split 2"
+                    a, z = d[idx].min(), d[idx].max()
+                    fill.loc[idx] = a.strftime("%b") if a.month == z.month else f"{a:%b}-{z:%b}"
+                else:
+                    fill.loc[idx] = f"Split {b + 1}"
+        games.loc[unl.index, "split"] = fill
+    games["period"] = [SPLIT_MAP.get((lg, sp if pd.notna(sp) else None), sp) if lg in mapped else sp
+                       for lg, sp in zip(games["league"], games["split"])]
+    return games
+
+
+def player_keys(games):
+    """Which rows are the same player. The same name + role is one player, unless that name has several Oracle's
+    Elixir playerids that never played for the same team (then they are different people). Duplicate ids of one
+    player on one team stay together. Returns a number per row: 0 for the player with the most games, then 1, ..."""
+    key = np.zeros(len(games), dtype=int)
+    ids = games.dropna(subset=["playerid"])
+    multi = ids.groupby(["player", "role"])["playerid"].nunique()
+    for nm, rl in multi[multi > 1].index:
+        m = ((games["player"] == nm) & (games["role"] == rl)).to_numpy()
+        sub = games[m]
+        teams = sub.dropna(subset=["playerid"]).groupby("playerid")["team"].agg(set)
+        root = {i: i for i in teams.index}
+        def find(x):
+            while root[x] != x:
+                x = root[x]
+            return x
+        for a, b in combinations(teams.index, 2):
+            if teams[a] & teams[b]:
+                root[find(a)] = find(b)
+        group = sub["playerid"].map(lambda i: find(i) if isinstance(i, str) else None)
+        order = {r: k for k, r in enumerate(group.value_counts().index)}
+        key[m] = group.map(order).fillna(0).astype(int).to_numpy()   # rows without an id join the biggest
+    return key
 
 
 def rate_players(g, c_by_role, K=K, W=INTL_WEIGHT, z=1.645):
@@ -191,7 +322,7 @@ def calibrate_c(games):
     return c
 
 
-def default_table(games, c_by_role):
+def default_table(games, c_by_role, leagues):
     """Per-player table (all games, domestic, international) for players_default_view.csv and the report."""
     dom_t = rate_players(games[games["kind"] == "domestic"], c_by_role).add_prefix("dom_").rename(columns={"dom_player": "player", "dom_role": "role"})
     all_t = rate_players(games, c_by_role)
@@ -202,16 +333,36 @@ def default_table(games, c_by_role):
     table = all_t.merge(dom_t[["player", "role", "dom_overall", "dom_games"]], on=["player", "role"], how="left") \
                  .merge(int_t[["player", "role"] + [c for c in int_t.columns if c in ("intl_overall", "intl_overall_low", "intl_overall_high", "intl_games")]],
                         on=["player", "role"], how="left")
-    table["league"] = table["team"].map(games.groupby("team")["league"].agg(lambda s: s[s.isin(LEAGUES)].mode().iloc[0] if s.isin(LEAGUES).any() else s.iloc[0]))
+    table["league"] = table["team"].map(games.groupby("team")["league"].agg(lambda s: s[s.isin(leagues)].mode().iloc[0] if s.isin(leagues).any() else s.iloc[0]))
     return table
 
 
-def report(table):
+def report(table, games, rated, cfg):
     show = ["league", "team", "player", "games", "dom_overall", "intl_overall", "overall", "overall_low", "overall_high", "early", "late"]
+    major = table["league"].isin(TIERS["major"])
     for role in ROLES:
-        x = table[(table["role"] == role) & (table["games"] >= MIN_GAMES_CALIBRATION)].sort_values("overall", ascending=False).head(10)
-        print(role.upper(), "(top 10, all games)")
+        x = table[major & (table["role"] == role) & (table["games"] >= MIN_GAMES_CALIBRATION)].sort_values("overall", ascending=False).head(10)
+        print(role.upper(), "(top 10, major-league players, all games)")
         print(x[[c for c in show if c in x.columns]].round(2).to_string(index=False), "\n")
+    print("Checks per baseline: acc = how often the team with the better-rated players won (leave-one-out),"
+          " stability = split-half reliability of r_overall")
+    rows = []
+    for name, p in rated.groupby("baseline"):
+        v = rc.validate(p.copy(), rc.player_table(p.copy(), cfg))
+        rows.append({"baseline": name, "games": v["games"], "players": v["players"], "acc": v["acc_player_ratings"],
+                     "acc_team_winrate": v["acc_team_winrate"], "stability": v["rel_overall"], "gap_win_loss": v["gap_overall"]})
+    print(pd.DataFrame(rows).round(3).to_string(index=False), "\n")
+
+
+def split_table(games):
+    """One line per league: its split names (with the common name for major leagues), games and dates."""
+    g = games.drop_duplicates(["gameid", "league"])
+    for lg, x in g.groupby("league", sort=False):
+        parts = []
+        for (per, sp), y in x.groupby(["period", "split"], dropna=False, sort=False):
+            name = f"{sp}" if per == sp or pd.isna(per) else f"{per} ({sp})"
+            parts.append(f"{name}: {len(y)} {y['date'].min():%m-%d}..{y['date'].max():%m-%d}")
+        print(f"  {lg:9s} {' | '.join(parts)}")
 
 
 def rows_of(frame):
@@ -225,34 +376,40 @@ def dump(path, obj):
         json.dump(obj, f, ensure_ascii=False, default=str, separators=(",", ":"))
 
 
-def write_site_data(games, c_by_role, cfg, out_dir):
+def write_site_data(games, c_by_role, cfg, out_dir, leagues, complete):
     """Writes index.json, summary/<year>.json and games/<year>/<league>.json (see the module docstring)."""
-    g_out = games[GAME_FIELDS + ["year"]].copy()
+    g_out = games[GAME_FIELDS + ["year", "playerid"]].copy()
     g_out["date"] = g_out["date"].dt.strftime("%Y-%m-%d")
     for c in ["r_early", "r_late", "r_overall"]:
         g_out[c] = g_out[c].round(3)
     g_out["gd15"] = g_out["gd15"].round(0)
     g_out[GAME_FIELDS].to_csv(os.path.join(out_dir, "games_rated.csv"), index=False)
 
-    # players in order of first appearance (the site gives them their page addresses in this order)
-    pkey = list(zip(g_out["player"], g_out["role"]))
-    players = list(dict.fromkeys(pkey))
+    # players: the same name + role is one player unless player_keys() splits it. Order: players with games in the
+    # BASELINE_GROUPS leagues or international events first, by first game there, then the rest by first game.
+    # The site gives page addresses in this order, so the players from before phase 1 keep theirs.
+    g_out["pk"] = player_keys(g_out)
+    pkey = list(zip(g_out["player"], g_out["role"], g_out["pk"]))
+    old = g_out["league"].isin([lg for lgs in BASELINE_GROUPS.values() for lg in lgs] + INTERNATIONAL).to_numpy()
+    first_old = dict.fromkeys(k for k, o in zip(pkey, old) if o)
+    players = list(first_old) + [k for k in dict.fromkeys(pkey) if k not in first_old]
     pidx = {k: i for i, k in enumerate(players)}
     g_out["pi"] = [pidx[k] for k in pkey]
+    game_fields = GAME_FIELDS + ["pi"]
 
-    years, files, pfiles = sorted(g_out["year"].unique().tolist()), {}, {k: [] for k in players}
+    years, files, pfiles = sorted(g_out["year"].unique().tolist()), {}, [[] for _ in players]
     for y in years:
         gy = g_out[g_out["year"] == y].reset_index(drop=True)
         gy["seq"] = np.arange(len(gy))                       # position in the year's date order, used to merge files
-        for old in glob.glob(os.path.join(out_dir, "games", str(y), "*.json")):
-            os.remove(old)                                    # drop league files that are no longer produced
+        for f in glob.glob(os.path.join(out_dir, "games", str(y), "*.json")):
+            os.remove(f)                                      # drop league files that are no longer produced
         for lg, part in gy.groupby("league", sort=False):
             key = f"{y}/{lg}"
             dump(os.path.join(out_dir, "games", str(y), f"{lg}.json"),
-                 {"fields": GAME_FIELDS, "rows": rows_of(part[GAME_FIELDS]), "seq": part["seq"].tolist()})
+                 {"fields": game_fields, "rows": rows_of(part[game_fields]), "seq": part["seq"].tolist()})
             files[key] = {"rows": int(len(part)), "kinds": sorted(part["kind"].unique().tolist())}
-            for k in dict.fromkeys(zip(part["player"], part["role"])):
-                pfiles[k].append(key)
+            for i in dict.fromkeys(part["pi"]):
+                pfiles[i].append(key)
 
         # the sums rateSums() in docs/app.js needs, per player x league x split x stage
         r = gy["r_overall"]
@@ -275,22 +432,28 @@ def write_site_data(games, c_by_role, cfg, out_dir):
     last_dom = g_out[g_out["kind"] == "domestic"].groupby("pi").tail(1).set_index("pi")
     n_games = g_out.groupby("pi").size()
     prow = [[name, role, last.at[i, "team"], (last_dom if i in last_dom.index else last).at[i, "league"],
-             int(n_games[i]), pfiles[(name, role)]] for i, (name, role) in enumerate(players)]
+             int(n_games[i]), pfiles[i]] for i, (name, role, _) in enumerate(players)]
 
-    for old in ["site_data.json"]:                            # the single-file layout from before
-        if os.path.exists(os.path.join(out_dir, old)):
-            os.remove(os.path.join(out_dir, old))
+    for f in ["site_data.json"]:                              # the single-file layout from before
+        if os.path.exists(os.path.join(out_dir, f)):
+            os.remove(os.path.join(out_dir, f))
+    shown = leagues + sorted(set(g_out["league"]) - set(leagues))
+    events = [lg for lg in EVENTS if lg in set(g_out.loc[g_out["kind"] == "event", "league"])]
     dump(os.path.join(out_dir, "index.json"), {
         "version": "0.2",
         "generated": datetime.now().isoformat(timespec="seconds"),
         "note": "Performance rating relative to the games it is built from. Not a measure of skill or of league strength.",
-        "config": {"leagues": LEAGUES, "baseline_groups": BASELINE_GROUPS, "international": INTERNATIONAL, "qualifiers": sorted(QUALIFIERS), "K": K, "intl_weight": INTL_WEIGHT,
+        "config": {"leagues": leagues, "events": events, "tiers": {lg: tier_of(lg) for lg in shown},
+                   "names": {lg: LEAGUE_NAMES[lg] for lg in shown if lg in LEAGUE_NAMES},
+                   "complete": {lg: complete[lg] for lg in shown if lg in complete and complete[lg] < 0.995},
+                   "baseline_groups": BASELINE_GROUPS, "international": INTERNATIONAL, "qualifiers": sorted(QUALIFIERS),
+                   "K": K, "intl_weight": INTL_WEIGHT,
                    "min_games": MIN_GAMES_CALIBRATION, "target_sd": TARGET_SD, "c_by_role": c_by_role,
-                   "baselines": "domestic games: one baseline per group of leagues (see baseline_groups); international games: their own baseline; qualifiers of international events: the baseline of each team's home league (a league not on the site: its own games), weight 1, not counted as international",
+                   "baselines": "each league its own baseline, except the leagues in baseline_groups, which share one; international games: their own baseline; events and qualifiers of international events: the baseline of each team's home league, weight 1, not counted as international",
                    "formula": "rating = 1 + c(role) * sum(w * (game_rating - 1)) / (sum(w) + K)",
                    "early_weights": cfg["EARLY_WEIGHTS"], "late_groups": cfg["LATE_GROUPS"],
                    "late_weights": cfg["LATE_WEIGHTS"], "early_share": cfg["EARLY_SHARE"]},
-        "years": years, "files": files, "game_fields": GAME_FIELDS, "summary_fields": SUMMARY_FIELDS,
+        "years": years, "files": files, "game_fields": game_fields, "summary_fields": SUMMARY_FIELDS,
         "players": {"fields": PLAYER_FIELDS, "rows": prow},
     })
 
@@ -298,24 +461,30 @@ def write_site_data(games, c_by_role, cfg, out_dir):
 def main(csv=FILE, out_dir=OUT_DIR, show_report=False):
     df = pd.read_csv(csv, low_memory=False)
     cfg = dict(rc.CFG)
-    dom, intl, qual = rate_baselines(df, cfg)
-    games = pd.concat([tidy(dom, "domestic")] + [tidy(x, k) for x, k in [(intl, "international"), (qual, "qualifier")] if x is not None],
+    dom, intl, ev, leagues = rate_baselines(df, cfg)
+    games = pd.concat([tidy(dom, "domestic")] + [tidy(x, k) for x, k in [(intl, "international"), (ev, "event")] if x is not None],
                       ignore_index=True)
     games = games.sort_values("date", kind="stable").reset_index(drop=True)
+    games = label_splits(games)
     print("rated player-games:", len(games), "| domestic:", int((games["kind"] == "domestic").sum()),
-          "| international:", int((games["kind"] == "international").sum()), "| qualifier:", int((games["kind"] == "qualifier").sum()))
+          "| international:", int((games["kind"] == "international").sum()), "| events:", int((games["kind"] == "event").sum()))
+    print("splits per league:"); split_table(games)
     c_by_role = calibrate_c(games)
     os.makedirs(out_dir, exist_ok=True)
-    table = default_table(games, c_by_role)
+    table = default_table(games, c_by_role, leagues)
     table.round(3).to_csv(os.path.join(out_dir, "players_default_view.csv"), index=False)
     if show_report:
-        report(table)
-    write_site_data(games, c_by_role, cfg, out_dir)
-    total = 0
-    for path in sorted(glob.glob(os.path.join(out_dir, "**", "*.json"), recursive=True)):
-        kb = os.path.getsize(path) / 1024; total += kb
-        print(f"{os.path.relpath(path, out_dir):26s} {kb:8.0f} KB")
-    print(f"{'total':26s} {total:8.0f} KB   saved in: {os.path.abspath(out_dir)}")
+        report(table, games, pd.concat([x for x in [dom, intl] if x is not None], ignore_index=True), cfg)
+    t = df[df["position"] == "team"]
+    complete = (t.drop_duplicates("gameid").groupby("league")["datacompleteness"].agg(lambda s: round(float((s == "complete").mean()), 2))).to_dict()
+    write_site_data(games, c_by_role, cfg, out_dir, leagues, complete)
+    sizes = {os.path.relpath(p, out_dir): os.path.getsize(p) / 1024
+             for p in glob.glob(os.path.join(out_dir, "**", "*.json"), recursive=True)}
+    games_kb = [kb for p, kb in sizes.items() if p.startswith("games")]
+    for p in sorted(p for p in sizes if not p.startswith("games")):
+        print(f"{p:26s} {sizes[p]:8.0f} KB")
+    print(f"{'games (' + str(len(games_kb)) + ' files)':26s} {sum(games_kb):8.0f} KB, largest {max(games_kb):.0f} KB")
+    print(f"{'total':26s} {sum(sizes.values()):8.0f} KB   saved in: {os.path.abspath(out_dir)}")
     return games, table
 
 
@@ -323,6 +492,6 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Build docs/data for the ratings site.")
     ap.add_argument("--csv", default=FILE, help="Oracle's Elixir match-data CSV")
     ap.add_argument("--out", default=OUT_DIR, help="output folder (docs/data)")
-    ap.add_argument("--report", action="store_true", help="print the top 10 per role")
+    ap.add_argument("--report", action="store_true", help="print the top 10 per role and checks per baseline")
     a = ap.parse_args()
     main(a.csv, a.out, a.report)

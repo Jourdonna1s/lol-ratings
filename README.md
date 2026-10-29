@@ -22,3 +22,5 @@ Open http://localhost:8000 (double-clicking index.html will not work, the browse
     index.json               config, years, list of game files, player index (search, which files a player is in)
     summary/<year>.json      per player x league x split x stage: the sums behind the leaderboards
     games/<year>/<lg>.json   every rated player-game of one league (loaded on player pages)
+
+Leagues, tiers, events and split names are set at the top of pipeline/build_site_data.py.

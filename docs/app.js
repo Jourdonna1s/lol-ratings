@@ -6,14 +6,19 @@ try{D=await getJSON('data/index.json');SF=await Promise.all(D.years.map(y=>getJS
 catch(e){app.innerHTML='<p>Could not load data/index.json. If you opened index.html by double-clicking, start a local server first (see README.md).</p>';return}
 const F={};
 D.game_fields.forEach((f,i)=>F[f]=i);
-const C=D.config,MIN=C.min_games||15,LEAGUES=C.leagues||C.tier1,
-BG=Object.keys(C.baseline_groups||{}).length>1?' Baseline groups: '+Object.values(C.baseline_groups).map(g=>g.join(', ')).join(' | ')+'. Ratings are not directly comparable between groups.':'';
+const C=D.config,MIN=C.min_games||15,LEAGUES=C.leagues||C.tier1,EVENTS=C.events||[],EV=new Set(EVENTS),TIER=C.tiers||{},
+MAJ=LEAGUES.filter(l=>TIER[l]=='major'),
+SHARED=Object.values(C.baseline_groups||{}).filter(g=>g.length>1).map(g=>g.join(', ').replace(/, ([^,]*)$/,' and $1')+' share one').join('; ');
 const RL={top:'Top',jng:'Jungle',mid:'Mid',bot:'Bot',sup:'Support'};
 const norm=s=>s.normalize('NFD').replace(/[\u0300-\u036f]/g,'');
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const f2=x=>x==null||isNaN(x)?'—':x.toFixed(2);
 const rc=x=>x>=1.15?'good':x<=0.9?'bad':'';
-const INTL='INTL',LN=L=>L=='all'?'All leagues':L==INTL?'International':L;
+const INTL='INTL',NAME=l=>(C.names||{})[l]||l,LN=L=>L=='all'?'All leagues':L=='major'?'Major leagues':L==INTL?'International':NAME(L);
+const COMB=L=>L=='all'||L=='major';   // the boards that combine leagues
+// tier of a league: Major / Tier 2 / Tier 3 / Event, shown as a small tag
+const TT=l=>({major:'Major',tier2:'Tier 2',tier3:'Tier 3',event:'Event'})[TIER[l]]||'';
+const tag=l=>TT(l)?` <span class="tag">${TT(l)}</span>`:'';
 const st={lg:LEAGUES.includes('LEC')?'LEC':LEAGUES[0],role:'all',split:'all',stage:'all',year:'all',plg:'all',all:0,pg:0};
 const yr=g=>g[F.date].slice(0,4),YEARS=D.years.map(String);
 const ORD=(yi,seq)=>yi*1e7+seq;   // position in the overall date order (year, then place within the year)
@@ -28,23 +33,26 @@ SF.forEach((f,yi)=>{const S={};f.fields.forEach((k,i)=>S[k]=i);
 SUM.sort((a,b)=>a.first-b.first);
 
 // which games a league choice covers, and whether a game (or summary row) passes the current filters
-const inL=(g,L)=>L=='all'||(L==INTL?g[F.kind]=='international':g[F.league]==L&&g[F.kind]=='domestic');
-const keep=(g,L)=>inL(g,L)&&(st.split=='all'||(L==INTL?g[F.league]:g[F.period])==st.split)
+// Major leagues: domestic games of the major leagues plus international games. All leagues: every game.
+// On the combined boards a split means the common split name, so only major-league games match one.
+const inL=(g,L)=>L=='all'||(L=='major'?g[F.kind]=='international'||g[F.kind]=='domestic'&&TIER[g[F.league]]=='major'
+  :L==INTL?g[F.kind]=='international':g[F.league]==L&&g[F.kind]==(EV.has(L)?'event':'domestic'));
+const keep=(g,L)=>inL(g,L)&&(st.split=='all'||(L==INTL?g[F.league]:g[F.period])==st.split&&(!COMB(L)||TIER[g[F.league]]=='major'))
   &&(st.stage=='all'||g[F.stage]==st.stage)&&(st.year=='all'||yr(g)==st.year);
 const sp={};
-const splits=L=>sp[L]||(sp[L]=[...new Set(SUM.filter(g=>inL(g,L)).map(g=>L==INTL?g[F.league]:g[F.period]).filter(x=>x!=null))]);
-const HAS_INTL=SUM.some(g=>g[F.kind]=='international'),QN=(C.qualifiers||[]).join('/');
+const splits=L=>sp[L]||(sp[L]=[...new Set(SUM.filter(g=>inL(g,L)&&(!COMB(L)||TIER[g[F.league]]=='major')).map(g=>L==INTL?g[F.league]:g[F.period]).filter(x=>x!=null))]);
+const HAS_INTL=SUM.some(g=>g[F.kind]=='international');
 // regional split names behind each common split name ("Winter" = LEC Versus, LCK Cup, ...)
 const RN={};
 for(const g of SUM)if(g[F.kind]=='domestic'&&g[F.period]&&g[F.split]){const a=((RN[g[F.league]]=RN[g[F.league]]||{})[g[F.period]]=RN[g[F.league]][g[F.period]]||[]);if(!a.includes(g[F.split]))a.push(g[F.split])}
 const rname=(L,s)=>{const a=(RN[L]||{})[s];return a&&a.join('/')!=s?a.join('/'):''};
-const regions=s=>LEAGUES.filter(l=>(RN[l]||{})[s]).map(l=>l+' '+RN[l][s].join('/')).join(', ');
-const legend=()=>{const ss=[...new Set(LEAGUES.flatMap(splits))];
+const regions=s=>MAJ.filter(l=>(RN[l]||{})[s]).map(l=>l+' '+RN[l][s].join('/')).join(', ');
+const legend=()=>{const ss=[...new Set(MAJ.flatMap(splits))];
   return ss.length&&Object.keys(RN).length?'Splits: '+ss.map(s=>s+' = '+regions(s)).join(' · ')+'.':''};
 
 // players come from the index; their games are loaded on their page only
 const PF={};D.players.fields.forEach((k,i)=>PF[k]=i);
-const list=D.players.rows.map(r=>({name:r[PF.name],role:r[PF.role],team:r[PF.team],league:r[PF.league],ngames:r[PF.games],files:r[PF.files],games:null})),seen={};
+const list=D.players.rows.map((r,i)=>({i,name:r[PF.name],role:r[PF.role],team:r[PF.team],league:r[PF.league],ngames:r[PF.games],files:r[PF.files],games:null})),seen={};
 list.forEach(p=>{
   let s='p-'+norm(p.name).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')+'-'+p.role;
   seen[s]=(seen[s]||0)+1;if(seen[s]>1)s+='-'+seen[s];
@@ -56,7 +64,7 @@ async function gamesOf(p){
   if(p.games)return p.games;
   const fs=await Promise.all(p.files.map(loadFile)),rows=[];
   fs.forEach((f,i)=>{const yi=YEARS.indexOf(p.files[i].slice(0,4));
-    f.rows.forEach((r,j)=>{if(r[F.player]==p.name&&r[F.role]==p.role)rows.push([ORD(yi,f.seq[j]),r])})});
+    f.rows.forEach((r,j)=>{if(F.pi!=null?r[F.pi]==p.i:r[F.player]==p.name&&r[F.role]==p.role)rows.push([ORD(yi,f.seq[j]),r])})});
   return p.games=rows.sort((a,b)=>a[0]-b[0]).map(x=>x[1]);
 }
 
@@ -99,17 +107,34 @@ function selection(L){
   return s.join(' · ');
 }
 function describe(L,thr){
-  return selection(L)+(st.stage=='all'?' · regular season and playoffs':' only')+(thr?` · players with ${thr}+ games`:'');
+  return selection(L)+(TT(L)?` (${TT(L)})`:'')+(st.stage=='all'?' · regular season and playoffs':' only')+(thr?` · players with ${thr}+ games`:'');
+}
+// footnote: how the games are weighted and rated, and which leagues have partial data
+function notes(L){
+  const s=[],part=Object.entries(C.complete||{}).filter(([l])=>L=='all'||l==L||L=='major'&&TIER[l]=='major');
+  if(L==INTL)s.push('International games are rated against their own baseline.');
+  else if(COMB(L)){
+    if(st.split=='all')s.push(`International games count ${C.intl_weight}×`+(L=='all'?', events and qualifiers count 1× (not as international games).':'.'));
+    else s.push(`A split covers the major leagues only (other leagues use their own split names).`);
+    s.push(`Every league is rated against its own baseline${SHARED?' ('+SHARED+')':''}, so ratings from different leagues are not directly comparable.`);
+  }else if(EV.has(L))s.push('Each team is rated against its home league’s baseline.');
+  if(part.length)s.push('Only games with full stats count ('+part.map(([l,v])=>`${l}: ${Math.round(v*100)}% of games`).join(', ')+').');
+  return s.join(' ');
+}
+// league options, grouped: combined boards, major, tier 2, tier 3, events, international
+function groups(lgs){
+  const G=[['Combined',l=>COMB(l)],['Major',l=>TIER[l]=='major'],['Tier 2',l=>TIER[l]=='tier2'],['Tier 3',l=>TIER[l]=='tier3'],['Events',l=>EV.has(l)],['International',l=>l==INTL]];
+  return G.map(([t,f])=>[t,lgs.filter(f)]).filter(([,ls])=>ls.length);
 }
 // shared filter bar: one row of dropdowns (league, split/event, stage, year, and role on the leaderboard)
 function filters(el,lgs,L,setL,redraw,roles){
   const sl=splits(L),on=st.split!='all'||st.stage!='all'||st.year!='all'||(roles&&st.role!='all');
-  const note=L=='all'?regions(st.split):L!=INTL&&rname(L,st.split)?L+' '+rname(L,st.split):'';
+  const note=COMB(L)?regions(st.split):L!=INTL&&rname(L,st.split)?L+' '+rname(L,st.split):'';
   const opt=(items,cur)=>items.map(([k,l,t])=>`<option value="${esc(k)}"${k==cur?' selected':''}${t?` title="${esc(t)}"`:''}>${esc(l)}</option>`).join('');
   const sel=(id,label,items,cur)=>`<select id="${id}" aria-label="${label}" class="${cur!='all'&&id!='f-lg'?'on':''}">${opt(items,cur)}</select>`;
   el.innerHTML=`<div class="fbar">
-  ${sel('f-lg','League',lgs.map(l=>[l,LN(l)]),L)}
-  ${sl.length?sel('f-sp',L==INTL?'Event':'Split',[['all',L==INTL?'All events':'All splits'],...sl.map(s=>{const r=L==INTL?'':rname(L,s);return[s,s,L=='all'?regions(s):r?`${L} calls it ${r}`:'']})],st.split):''}
+  <select id="f-lg" aria-label="League">${groups(lgs).map(([t,ls])=>`<optgroup label="${t}">${opt(ls.map(l=>[l,LN(l)]),L)}</optgroup>`).join('')}</select>
+  ${sl.length?sel('f-sp',L==INTL?'Event':'Split',[['all',L==INTL?'All events':'All splits'],...sl.map(s=>{const r=L==INTL?'':rname(L,s);return[s,s,COMB(L)?regions(s):r?`${L} calls it ${r}`:'']})],st.split):''}
   ${sel('f-st','Stage',[['all','All stages'],['regular','Regular season'],['playoffs','Playoffs']],st.stage)}
   ${sel('f-yr','Year',[['all','All years'],...YEARS.map(y=>[y,y])],st.year)}
   ${roles?sel('f-rl','Role',[['all','All roles'],...Object.entries(RL)],st.role):''}
@@ -131,32 +156,33 @@ function home(){
   q.oninput=()=>{
     const t=norm(q.value).toLowerCase().trim();
     const m=t?list.filter(p=>p.n.includes(t)).sort((a,b)=>(b.n.startsWith(t)-a.n.startsWith(t))||b.ngames-a.ngames).slice(0,8):[];
-    res.innerHTML=m.map(p=>`<a href="#${p.slug}"><span><b>${esc(p.name)}</b> <span class="mut sm">${RL[p.role]}</span></span><span class="mut sm">${esc(p.team)} · ${p.league}</span></a>`).join('');
+    res.innerHTML=m.map(p=>`<a href="#${p.slug}"><span><b>${esc(p.name)}</b> <span class="mut sm">${RL[p.role]}</span></span><span class="mut sm">${esc(p.team)} · ${esc(p.league)}${tag(p.league)}</span></a>`).join('');
   };
   q.onkeydown=e=>{if(e.key=='Enter'){const a=res.querySelector('a');if(a)location.hash=a.getAttribute('href').slice(1)}};
   draw();
 }
 function draw(){
-  filters(document.getElementById('fb'),['all',...LEAGUES,...(HAS_INTL?[INTL]:[])],st.lg,k=>st.lg=k,draw,1);
+  const rest=LEAGUES.filter(l=>TIER[l]!='major').sort((a,b)=>NAME(a).localeCompare(NAME(b)));
+  filters(document.getElementById('fb'),['major','all',...MAJ,...rest,...EVENTS,...(HAS_INTL?[INTL]:[])],st.lg,k=>st.lg=k,draw,1);
   const b=board(st.lg);
   let rows=b.rows.filter(x=>st.role=='all'||x.p.role==st.role);
   const tot=rows.length;if(!st.all)rows=rows.slice(0,20);
   document.getElementById('lb').innerHTML=`<table class="lbt"><tr><th>#</th><th>Player</th><th>Games</th><th>Rating</th></tr>`+
-    (rows.length?rows.map((x,i)=>`<tr><td>${i+1}</td><td class="pl"><a href="#${x.p.slug}">${esc(x.p.name)}</a><div class="mut sub">${esc(x.team)} · ${RL[x.p.role]}</div></td><td>${x.r.n}</td><td class="${rc(x.r.x)}"><b class="rt">${f2(x.r.x)}</b> <span class="mut sm rng">${f2(x.r.lo)}–${f2(x.r.hi)}</span></td></tr>`).join('')
+    (rows.length?rows.map((x,i)=>`<tr><td>${i+1}</td><td class="pl"><a href="#${x.p.slug}">${esc(x.p.name)}</a><div class="mut sub">${esc(x.team)} · ${RL[x.p.role]}${COMB(st.lg)?` · ${esc(x.p.league)}${tag(x.p.league)}`:''}</div></td><td>${x.r.n}</td><td class="${rc(x.r.x)}"><b class="rt">${f2(x.r.x)}</b> <span class="mut sm rng">${f2(x.r.lo)}–${f2(x.r.hi)}</span></td></tr>`).join('')
     :`<tr><td colspan="4" class="mut">No players for these filters.</td></tr>`)+`</table>`;
   const mb=document.getElementById('mb');
   mb.innerHTML=tot>20&&!st.all?`<button class="more" id="more">Show all ${tot}</button>`:'';
   if(mb.firstChild)document.getElementById('more').onclick=()=>{st.all=1;draw()};
-  document.getElementById('fn').textContent=`${describe(st.lg,b.thr)}. Ranges are a ~90% interval.${st.lg==INTL?' International games are rated against their own baseline.':(st.lg=='all'&&st.split=='all'?` International games count ${C.intl_weight}×${QN?`, ${QN} qualifiers count 1× (not as international games)`:''}.`:'')+BG}`;
+  document.getElementById('fn').textContent=`${describe(st.lg,b.thr)}. Ranges are a ~90% interval. ${notes(st.lg)}`;
 }
 
 function playerPage(p){
-  const ls=[...LEAGUES.filter(l=>p.games.some(g=>inL(g,l))),...(p.games.some(g=>inL(g,INTL))?[INTL]:[])];
+  const ls=[...LEAGUES,...EVENTS,INTL].filter(l=>p.games.some(g=>inL(g,l)));
   if(st.plg!='all'&&!ls.includes(st.plg))st.plg='all';
   const gs=p.games.filter(g=>keep(g,st.plg)),dom=gs.filter(g=>g[F.kind]=='domestic'),intl=gs.filter(g=>g[F.kind]=='international'),n=gs.length;
   const head=`<a href="#home">← All players</a>
   <h1 style="margin-top:8px">${esc(p.name)}</h1>
-  <div class="mut">${RL[p.role]} · ${esc(p.team)} · ${[...new Set(p.games.map(g=>g[F.league]))].join(', ')}</div>`;
+  <div class="mut">${RL[p.role]} · ${esc(p.team)} · ${esc(p.league)}${tag(p.league)}${(o=>o.length?' · '+esc(o.join(', ')):'')([...new Set(p.games.map(g=>g[F.league]))].filter(l=>l!=p.league))}</div>`;
   const redraw=()=>{st.pg=0;playerPage(p)},bar=()=>filters(document.getElementById('fb'),['all',...ls],st.plg,k=>st.plg=k,redraw);
   if(!n){
     app.innerHTML=head+`<div id="fb" style="margin-top:14px"></div><p class="mut">No games for this player in the selected filters. Change or reset the filters above.</p>`;
@@ -176,7 +202,7 @@ function playerPage(p){
   app.innerHTML=head+`
   <div id="fb" style="margin-top:14px"></div>
   <div class="cards">${card('Overall rating · '+esc(selection(st.plg)),o,1)}${card('Domestic',d)}${card('International',i)}</div>
-  <p class="mut sm">Ranges are a ~90% interval. Overall counts international games ${C.intl_weight}×${QN&&p.games.some(g=>g[F.kind]=='qualifier')?`, ${QN} qualifiers 1× (they are not in the International rating)`:''}. Early game ${f2(e&&e.x)} · Late game ${f2(l&&l.x)}.</p>
+  <p class="mut sm">Ranges are a ~90% interval. Overall counts international games ${C.intl_weight}×${p.games.some(g=>g[F.kind]=='event')?', events and qualifiers 1× (they are not in the International rating)':''}. Early game ${f2(e&&e.x)} · Late game ${f2(l&&l.x)}.</p>
   <h2>Stats</h2><div class="cards">
   ${stat('Games',n)}${stat('Win rate',(100*W/n).toFixed(0)+'%')}${stat('KDA',((K+A)/Math.max(De,1)).toFixed(2))}
   ${stat('K / D / A per game',(K/n).toFixed(1)+' / '+(De/n).toFixed(1)+' / '+(A/n).toFixed(1))}
