@@ -33,8 +33,9 @@ FILE = "2026_LoL_esports_match_data_from_OraclesElixir.csv"
 # leagues that share one baseline; every other league with enough games gets its own
 BASELINE_GROUPS = {"main": ["LCK", "LPL", "LEC", "LCS"], "lcp": ["LCP"]}
 MIN_BASELINE_GAMES = 30   # complete games a league needs for its own baseline (smaller leagues are left out)
-# league tiers shown on the site. Leagues not listed are tier 2.
-TIERS = {"major": ["LCK", "LPL", "LEC", "LCS", "LCP", "CBLOL"],
+# league tiers shown on the site: major, tier 1, tier 2 (leagues not listed), tier 3
+TIERS = {"major": ["LCK", "LPL", "LEC", "LCS"],
+         "tier1": ["LCP", "CBLOL"],
          "tier3": ["LAS", "NL", "HC"]}
 INTERNATIONAL = ["MSI", "WLDs", "FST", "EWC"]          # league codes of international events
 # cross-league events (teams from several leagues): each team is rated against its home league's baseline,
@@ -62,9 +63,6 @@ SPLIT_MAP = {
     ("LPL", "Split 1"): "Winter", ("LPL", "Split 2"): "Spring", ("LPL", "Split 3"): "Summer",
     ("LCS", "Lock-In"): "Winter", ("LCS", "Spring"): "Spring", ("LCS", "Summer"): "Summer",
     ("LCS", None): "Summer",   # unlabelled LCS games of Oct 5-13, right after LCS Summer
-    ("LCP", "Split 1"): "Winter", ("LCP", "Split 2"): "Spring", ("LCP", "Split 3"): "Summer",
-    ("CBLOL", "Cup"): "Winter", ("CBLOL", "Split 1"): "Spring", ("CBLOL", "Split 2"): "Summer",
-    ("CBLOL", None): "Summer",  # unlabelled CBLOL games of Sep 28-Oct 12, at the end of Split 2
 }
 SPLIT_GAP_DAYS = 21    # unlabelled games: take the nearest labelled game's split within this many days
 OUT_DIR = "../docs/data"
@@ -328,7 +326,7 @@ def team_games(df, games, leagues, events):
     g = pd.DataFrame({"blue": b.loc[order, "ti"].to_numpy(), "red": r.loc[order, "ti"].to_numpy(),
                       "blue_lg": b.loc[order, "home"].to_numpy(), "red_lg": r.loc[order, "home"].to_numpy(),
                       "blue_win": b.loc[order, "result"].to_numpy(dtype=float)}, index=order)
-    major_events = {lg for lg, c in t[t["kind"] == "event"].groupby("league") if any(tier_of(h) == "major" for h in c["home"])}
+    major_events = {lg for lg, c in t[t["kind"] == "event"].groupby("league") if any(tier_of(h) in ("major", "tier1") for h in c["home"])}
     major_events -= set(QUALIFIERS)
     # what a game counts for: international events by name, EM, other events, EWC qualifiers, leagues by tier
     t["comp"] = np.where(t["kind"] == "international", t["league"],

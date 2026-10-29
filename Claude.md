@@ -14,7 +14,7 @@ Static website (docs/) plus a Python rating pipeline (pipeline/).
 - Never commit CSV files. The Oracle's Elixir data stays local (.gitignore covers *.csv).
 - These are performance ratings relative to the games counted, not skill. Keep that wording on the site.
 - Every league in the file with 30+ complete games is on the site with its own baseline; LCK/LPL/LEC/LCS share one (BASELINE_GROUPS), international games have theirs. Ratings of the main leagues must not change when leagues are added.
-- Every league has a tier (TIERS): Major, Tier 2 (default) or Tier 3, shown on the site. The "Major leagues" board combines the major leagues and international games; "All leagues" combines every game.
+- Every league has a tier (TIERS): Major (LCK, LPL, LEC, LCS), Tier 1 (LCP, CBLOL), Tier 2 (default) or Tier 3, shown on the site. The "Major leagues" board combines the major leagues and international games; "All leagues" combines every game.
 - Events (EVENTS: cups like EMEA Masters, KeSPA Cup) and qualifiers of international events (QUALIFIERS, e.g. EWC qualifiers) are rated per team against its home league's baseline, count 1× in the overall rating, and are not international games. Events get their own board.
 - Only major leagues use the common Winter/Spring/Summer names (SPLIT_MAP). Other leagues keep their real split names; unlabelled games join the nearest split, else get a name from the schedule.
 - A player is name + role, split into separate players only when several playerids never shared a team. Players from before phase 1 come first in the index so their page addresses stay the same.
