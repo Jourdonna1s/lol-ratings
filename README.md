@@ -1,16 +1,24 @@
 # Pro player ratings
 
 pipeline/  rating code and notebooks (needs the Oracle's Elixir match-data CSV, not stored in git)
-docs/      the website (static files). docs/data/site_data.json is written by pipeline/lec_rating_site_data.ipynb
+docs/      the website (static files). docs/data/ is written by pipeline/build_site_data.py
 
 ## Preview locally
     cd docs
     python -m http.server 8000
-Open http://localhost:8000 (double-clicking index.html will not work, the browser blocks loading the data file).
+Open http://localhost:8000 (double-clicking index.html will not work, the browser blocks loading the data files).
 
 ## Update the ratings
-1. Put the CSV in pipeline/ and run pipeline/lec_rating_site_data.ipynb (Run All). It writes docs/data/site_data.json.
-2. Preview, then (the first time only, run git init and git remote add origin <repo URL> first):
-    git add .
-    git commit -m "update ratings"
-    git push
+1. Put the CSV in pipeline/ and run, from pipeline/:
+       python build_site_data.py
+   (or open pipeline/lec_rating_site_data.ipynb and Run All, it runs the same script). It rewrites docs/data/.
+2. Preview, then commit on a branch and open a pull request into main:
+       git checkout -b update-ratings
+       git add docs/data
+       git commit -m "update ratings"
+       git push -u origin update-ratings
+
+## Data files (docs/data/, generated)
+    index.json               config, years, list of game files, player index (search, which files a player is in)
+    summary/<year>.json      per player x league x split x stage: the sums behind the leaderboards
+    games/<year>/<lg>.json   every rated player-game of one league (loaded on player pages)

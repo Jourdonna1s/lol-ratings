@@ -1,9 +1,12 @@
 (async()=>{
-let D;
-try{D=await (await fetch('data/site_data.json')).json()}catch(e){document.getElementById('app').innerHTML='<p>Could not load data/site_data.json. If you opened index.html by double-clicking, start a local server first (see README.md).</p>';return}
+const app=document.getElementById('app');
+const getJSON=async u=>{const r=await fetch(u);if(!r.ok)throw new Error(u+' '+r.status);return r.json()};
+let D,SF;
+try{D=await getJSON('data/index.json');SF=await Promise.all(D.years.map(y=>getJSON(`data/summary/${y}.json`)))}
+catch(e){app.innerHTML='<p>Could not load data/index.json. If you opened index.html by double-clicking, start a local server first (see README.md).</p>';return}
 const F={};
-(D.fields||D.game_fields).forEach((f,i)=>F[f]=i);
-const C=D.config,MIN=C.min_games||15,LEAGUES=C.leagues||C.tier1,app=document.getElementById('app'),
+D.game_fields.forEach((f,i)=>F[f]=i);
+const C=D.config,MIN=C.min_games||15,LEAGUES=C.leagues||C.tier1,
 BG=Object.keys(C.baseline_groups||{}).length>1?' Baseline groups: '+Object.values(C.baseline_groups).map(g=>g.join(', ')).join(' | ')+'. Ratings are not directly comparable between groups.':'';
 const RL={top:'Top',jng:'Jungle',mid:'Mid',bot:'Bot',sup:'Support'};
 const norm=s=>s.normalize('NFD').replace(/[\u0300-\u036f]/g,'');
@@ -12,52 +15,78 @@ const f2=x=>x==null||isNaN(x)?'—':x.toFixed(2);
 const rc=x=>x>=1.15?'good':x<=0.9?'bad':'';
 const INTL='INTL',LN=L=>L=='all'?'All leagues':L==INTL?'International':L;
 const st={lg:LEAGUES.includes('LEC')?'LEC':LEAGUES[0],role:'all',split:'all',stage:'all',year:'all',plg:'all',all:0,pg:0};
-const yr=g=>g[F.date].slice(0,4),YEARS=[...new Set(D.games.map(yr))].sort();
+const yr=g=>g[F.date].slice(0,4),YEARS=D.years.map(String);
+const ORD=(yi,seq)=>yi*1e7+seq;   // position in the overall date order (year, then place within the year)
 
-// which games a league choice covers, and whether a game passes the current filters
+// summary rows: one per player x league x split x stage, holding the sums rateSums() needs.
+// They are shaped like game rows (same F positions for league, kind, period, split, stage, team, date=year) so keep() works on both.
+const SUM=[];
+SF.forEach((f,yi)=>{const S={};f.fields.forEach((k,i)=>S[k]=i);
+  for(const r of f.rows){const c=[];for(const k of ['league','kind','period','split','stage','team'])c[F[k]]=r[S[k]];c[F.date]=YEARS[yi];
+    c.pi=r[S.player];c.games=r[S.games];c.sums={n:r[S.n],sw:r[S.sw],swd:r[S.swd],sw2:r[S.sw2],s1:r[S.s1],s2:r[S.s2]};
+    c.first=ORD(yi,r[S.first]);c.last=ORD(yi,r[S.last]);SUM.push(c)}});
+SUM.sort((a,b)=>a.first-b.first);
+
+// which games a league choice covers, and whether a game (or summary row) passes the current filters
 const inL=(g,L)=>L=='all'||(L==INTL?g[F.kind]=='international':g[F.league]==L&&g[F.kind]=='domestic');
 const keep=(g,L)=>inL(g,L)&&(st.split=='all'||(L==INTL?g[F.league]:g[F.period])==st.split)
   &&(st.stage=='all'||g[F.stage]==st.stage)&&(st.year=='all'||yr(g)==st.year);
 const sp={};
-const splits=L=>sp[L]||(sp[L]=[...new Set(D.games.filter(g=>inL(g,L)).sort((a,b)=>a[F.date]<b[F.date]?-1:a[F.date]>b[F.date]?1:0)
-  .map(g=>L==INTL?g[F.league]:g[F.period]).filter(x=>x!=null))]);
-const HAS_INTL=D.games.some(g=>g[F.kind]=='international');
+const splits=L=>sp[L]||(sp[L]=[...new Set(SUM.filter(g=>inL(g,L)).map(g=>L==INTL?g[F.league]:g[F.period]).filter(x=>x!=null))]);
+const HAS_INTL=SUM.some(g=>g[F.kind]=='international');
 // regional split names behind each common split name ("Winter" = LEC Versus, LCK Cup, ...)
 const RN={};
-if(F.split!=null)for(const g of D.games)if(g[F.kind]=='domestic'&&g[F.period]&&g[F.split]){const a=((RN[g[F.league]]=RN[g[F.league]]||{})[g[F.period]]=RN[g[F.league]][g[F.period]]||[]);if(!a.includes(g[F.split]))a.push(g[F.split])}
+for(const g of SUM)if(g[F.kind]=='domestic'&&g[F.period]&&g[F.split]){const a=((RN[g[F.league]]=RN[g[F.league]]||{})[g[F.period]]=RN[g[F.league]][g[F.period]]||[]);if(!a.includes(g[F.split]))a.push(g[F.split])}
 const rname=(L,s)=>{const a=(RN[L]||{})[s];return a&&a.join('/')!=s?a.join('/'):''};
 const regions=s=>LEAGUES.filter(l=>(RN[l]||{})[s]).map(l=>l+' '+RN[l][s].join('/')).join(', ');
 const legend=()=>{const ss=[...new Set(LEAGUES.flatMap(splits))];
   return ss.length&&Object.keys(RN).length?'Splits: '+ss.map(s=>s+' = '+regions(s)).join(' · ')+'.':''};
 
-const P={};
-for(const r of D.games){const k=r[F.player]+'|'+r[F.role];(P[k]=P[k]||{name:r[F.player],role:r[F.role],games:[]}).games.push(r)}
-const list=Object.values(P),seen={};
+// players come from the index; their games are loaded on their page only
+const PF={};D.players.fields.forEach((k,i)=>PF[k]=i);
+const list=D.players.rows.map(r=>({name:r[PF.name],role:r[PF.role],team:r[PF.team],league:r[PF.league],ngames:r[PF.games],files:r[PF.files],games:null})),seen={};
 list.forEach(p=>{
   let s='p-'+norm(p.name).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')+'-'+p.role;
   seen[s]=(seen[s]||0)+1;if(seen[s]>1)s+='-'+seen[s];
   p.slug=s;p.n=norm(p.name).toLowerCase();
-  const last=p.games[p.games.length-1],dg=p.games.filter(g=>g[F.kind]=='domestic');
-  p.team=last[F.team];p.league=(dg.length?dg[dg.length-1]:last)[F.league];
 });
-
-function rate(gs,m){
-  let n=0,s=0,w2=0;const v=[];
-  for(const g of gs){const r=g[m];if(r==null)continue;const w=g[F.kind]=='international'?C.intl_weight:1;n+=w;s+=w*(r-1);w2+=w*w;v.push(r)}
-  if(!v.length)return null;
-  const c=C.c_by_role[gs[0][F.role]],den=n+C.K,mu=v.reduce((a,b)=>a+b)/v.length;
-  const sd=v.length>1?Math.sqrt(v.reduce((a,b)=>a+(b-mu)**2,0)/(v.length-1)):0;
-  const x=1+c*s/den,h=1.645*c*sd*Math.sqrt(w2)/den;
-  return{x,lo:x-h,hi:x+h,n:v.length};
+const files={};
+const loadFile=k=>files[k]||(files[k]=getJSON(`data/games/${k}.json`).catch(e=>{delete files[k];throw e}));
+async function gamesOf(p){
+  if(p.games)return p.games;
+  const fs=await Promise.all(p.files.map(loadFile)),rows=[];
+  fs.forEach((f,i)=>{const yi=YEARS.indexOf(p.files[i].slice(0,4));
+    f.rows.forEach((r,j)=>{if(r[F.player]==p.name&&r[F.role]==p.role)rows.push([ORD(yi,f.seq[j]),r])})});
+  return p.games=rows.sort((a,b)=>a[0]-b[0]).map(x=>x[1]);
 }
+
+// rating for a set of games, from sums: weighted count, weighted deviation, squared weights, and the deviations' sum and square sum (spread)
+function sumsOf(gs,m){
+  const s={n:0,sw:0,swd:0,sw2:0,s1:0,s2:0};
+  for(const g of gs){const r=g[m];if(r==null)continue;const w=g[F.kind]=='international'?C.intl_weight:1;s.n++;s.sw+=w;s.swd+=w*(r-1);s.sw2+=w*w;s.s1+=r-1;s.s2+=(r-1)**2}
+  return s;
+}
+const addSums=(a,b)=>{for(const k in b)a[k]+=b[k];return a};
+function rateSums(s,role){
+  if(!s.n)return null;
+  const c=C.c_by_role[role],den=s.sw+C.K;
+  const sd=s.n>1?Math.sqrt(Math.max(0,(s.s2-s.s1*s.s1/s.n)/(s.n-1))):0;
+  const x=1+c*s.swd/den,h=1.645*c*sd*Math.sqrt(s.sw2)/den;
+  return{x,lo:x-h,hi:x+h,n:s.n};
+}
+const rate=(gs,m)=>gs.length?rateSums(sumsOf(gs,m),gs[0][F.role]):null;
 // min games: the configured minimum, lowered for small selections (one split) to half the most games anyone has in it
 const lb={};
 function board(L){
   const k=[L,st.split,st.stage,st.year].join('|');
   if(lb[k])return lb[k];
-  const sel=list.map(p=>({p,gs:p.games.filter(g=>keep(g,L))})).filter(x=>x.gs.length);
-  const thr=Math.max(1,Math.min(MIN,Math.ceil(sel.reduce((a,x)=>Math.max(a,x.gs.length),0)/2)));
-  const rows=sel.filter(x=>x.gs.length>=thr).map(x=>({p:x.p,team:x.gs[x.gs.length-1][F.team],r:rate(x.gs,F.r_overall)}))
+  const agg=new Map();
+  for(const c of SUM){if(!keep(c,L))continue;
+    let a=agg.get(c.pi);if(!a)agg.set(c.pi,a={pi:c.pi,games:0,s:{n:0,sw:0,swd:0,sw2:0,s1:0,s2:0},last:-1,team:null});
+    a.games+=c.games;addSums(a.s,c.sums);if(c.last>a.last){a.last=c.last;a.team=c[F.team]}}
+  const sel=[...agg.values()].sort((a,b)=>a.pi-b.pi);
+  const thr=Math.max(1,Math.min(MIN,Math.ceil(sel.reduce((a,x)=>Math.max(a,x.games),0)/2)));
+  const rows=sel.filter(x=>x.games>=thr).map(x=>({p:list[x.pi],team:x.team,r:rateSums(x.s,list[x.pi].role)}))
     .filter(x=>x.r).sort((a,b)=>b.r.x-a.r.x);
   return lb[k]={rows,thr};
 }
@@ -101,7 +130,7 @@ function home(){
   const q=document.getElementById('q'),res=document.getElementById('res');
   q.oninput=()=>{
     const t=norm(q.value).toLowerCase().trim();
-    const m=t?list.filter(p=>p.n.includes(t)).sort((a,b)=>(b.n.startsWith(t)-a.n.startsWith(t))||b.games.length-a.games.length).slice(0,8):[];
+    const m=t?list.filter(p=>p.n.includes(t)).sort((a,b)=>(b.n.startsWith(t)-a.n.startsWith(t))||b.ngames-a.ngames).slice(0,8):[];
     res.innerHTML=m.map(p=>`<a href="#${p.slug}"><span><b>${esc(p.name)}</b> <span class="mut sm">${RL[p.role]}</span></span><span class="mut sm">${esc(p.team)} · ${p.league}</span></a>`).join('');
   };
   q.onkeydown=e=>{if(e.key=='Enter'){const a=res.querySelector('a');if(a)location.hash=a.getAttribute('href').slice(1)}};
@@ -161,11 +190,19 @@ function playerPage(p){
   const mg=document.getElementById('mg');if(mg)mg.onclick=()=>{st.pg=1;playerPage(p)};
 }
 
-function route(){
-  const h=location.hash.slice(1),p=list.find(x=>x.slug==h);
+let nav=0;
+async function route(){
+  const h=location.hash.slice(1),p=list.find(x=>x.slug==h),my=++nav;
   st.pg=0;
-  // a chosen split only makes sense with its league, so carry the league over in that case
-  if(p){st.plg=st.split!='all'&&p.games.some(g=>inL(g,st.lg))?st.lg:'all';playerPage(p)}else home();
+  if(p){
+    if(!p.games){
+      app.innerHTML='<p class="mut">Loading…</p>';
+      try{await gamesOf(p)}catch(e){if(my==nav)app.innerHTML='<p>Could not load this player’s games. <a href="#home">Back to all players</a></p>';return}
+      if(my!=nav)return;
+    }
+    // a chosen split only makes sense with its league, so carry the league over in that case
+    st.plg=st.split!='all'&&p.games.some(g=>inL(g,st.lg))?st.lg:'all';playerPage(p);
+  }else home();
   window.scrollTo(0,0);
 }
 window.addEventListener('hashchange',route);route();
