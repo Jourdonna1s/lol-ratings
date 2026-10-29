@@ -33,7 +33,7 @@ const keep=(g,L)=>inL(g,L)&&(st.split=='all'||(L==INTL?g[F.league]:g[F.period])=
   &&(st.stage=='all'||g[F.stage]==st.stage)&&(st.year=='all'||yr(g)==st.year);
 const sp={};
 const splits=L=>sp[L]||(sp[L]=[...new Set(SUM.filter(g=>inL(g,L)).map(g=>L==INTL?g[F.league]:g[F.period]).filter(x=>x!=null))]);
-const HAS_INTL=SUM.some(g=>g[F.kind]=='international');
+const HAS_INTL=SUM.some(g=>g[F.kind]=='international'),QN=(C.qualifiers||[]).join('/');
 // regional split names behind each common split name ("Winter" = LEC Versus, LCK Cup, ...)
 const RN={};
 for(const g of SUM)if(g[F.kind]=='domestic'&&g[F.period]&&g[F.split]){const a=((RN[g[F.league]]=RN[g[F.league]]||{})[g[F.period]]=RN[g[F.league]][g[F.period]]||[]);if(!a.includes(g[F.split]))a.push(g[F.split])}
@@ -147,13 +147,13 @@ function draw(){
   const mb=document.getElementById('mb');
   mb.innerHTML=tot>20&&!st.all?`<button class="more" id="more">Show all ${tot}</button>`:'';
   if(mb.firstChild)document.getElementById('more').onclick=()=>{st.all=1;draw()};
-  document.getElementById('fn').textContent=`${describe(st.lg,b.thr)}. Ranges are a ~90% interval.${st.lg==INTL?' International games are rated against their own baseline.':(st.lg=='all'&&st.split=='all'?` International games count ${C.intl_weight}×.`:'')+BG}`;
+  document.getElementById('fn').textContent=`${describe(st.lg,b.thr)}. Ranges are a ~90% interval.${st.lg==INTL?' International games are rated against their own baseline.':(st.lg=='all'&&st.split=='all'?` International games count ${C.intl_weight}×${QN?`, ${QN} qualifiers count 1× (not as international games)`:''}.`:'')+BG}`;
 }
 
 function playerPage(p){
   const ls=[...LEAGUES.filter(l=>p.games.some(g=>inL(g,l))),...(p.games.some(g=>inL(g,INTL))?[INTL]:[])];
   if(st.plg!='all'&&!ls.includes(st.plg))st.plg='all';
-  const gs=p.games.filter(g=>keep(g,st.plg)),dom=gs.filter(g=>g[F.kind]=='domestic'),intl=gs.filter(g=>g[F.kind]!='domestic'),n=gs.length;
+  const gs=p.games.filter(g=>keep(g,st.plg)),dom=gs.filter(g=>g[F.kind]=='domestic'),intl=gs.filter(g=>g[F.kind]=='international'),n=gs.length;
   const head=`<a href="#home">← All players</a>
   <h1 style="margin-top:8px">${esc(p.name)}</h1>
   <div class="mut">${RL[p.role]} · ${esc(p.team)} · ${[...new Set(p.games.map(g=>g[F.league]))].join(', ')}</div>`;
@@ -176,7 +176,7 @@ function playerPage(p){
   app.innerHTML=head+`
   <div id="fb" style="margin-top:14px"></div>
   <div class="cards">${card('Overall rating · '+esc(selection(st.plg)),o,1)}${card('Domestic',d)}${card('International',i)}</div>
-  <p class="mut sm">Ranges are a ~90% interval. Overall counts international games ${C.intl_weight}× . Early game ${f2(e&&e.x)} · Late game ${f2(l&&l.x)}.</p>
+  <p class="mut sm">Ranges are a ~90% interval. Overall counts international games ${C.intl_weight}×${QN&&p.games.some(g=>g[F.kind]=='qualifier')?`, ${QN} qualifiers 1× (they are not in the International rating)`:''}. Early game ${f2(e&&e.x)} · Late game ${f2(l&&l.x)}.</p>
   <h2>Stats</h2><div class="cards">
   ${stat('Games',n)}${stat('Win rate',(100*W/n).toFixed(0)+'%')}${stat('KDA',((K+A)/Math.max(De,1)).toFixed(2))}
   ${stat('K / D / A per game',(K/n).toFixed(1)+' / '+(De/n).toFixed(1)+' / '+(A/n).toFixed(1))}
