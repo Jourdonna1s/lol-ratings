@@ -99,11 +99,17 @@ def add_raw_stats(p):
     return p
 
 
-def rate(p, cfg=CFG):
-    """Adds z-scores, early/late/overall scores and game ratings (r_early, r_late, r_overall)."""
+def rate(p, cfg=CFG, ref=None):
+    """Adds z-scores, early/late/overall scores and game ratings (r_early, r_late, r_overall).
+    ref: optional boolean mask of the rows that make up the baseline (default: all rows). The other rows
+    are rated against that baseline without changing it."""
+    def moments(col):
+        g = (p[col] if ref is None else p[col].where(ref)).groupby(p["position"])
+        return g.transform("mean"), g.transform("std")
+
     def zscore(col):
-        g = p.groupby("position")[col]
-        z = (p[col] - g.transform("mean")) / g.transform("std")
+        mu, sd = moments(col)
+        z = (p[col] - mu) / sd
         return (cfg["SIGNS"].get(col, 1) * z).clip(-3, 3)
 
     stats = list(cfg["EARLY_WEIGHTS"]) + [s for grp in cfg["LATE_GROUPS"].values() for s in grp]
@@ -130,8 +136,8 @@ def rate(p, cfg=CFG):
     both = p["early"].notna() & p["late"].notna()
     p["overall"] = np.where(both, share * p["early"] + (1 - share) * p["late"], p["early"].fillna(p["late"]))
     for c in ["early", "late", "overall"]:
-        g = p.groupby("position")[c]
-        p["r_" + c] = 1 + cfg["GAME_SD"] * (p[c] - g.transform("mean")) / g.transform("std")
+        mu, sd = moments(c)
+        p["r_" + c] = 1 + cfg["GAME_SD"] * (p[c] - mu) / sd
     p.attrs["skipped_stats"] = skipped
     return p
 

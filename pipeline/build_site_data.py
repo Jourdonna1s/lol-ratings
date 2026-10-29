@@ -29,6 +29,10 @@ FILE = "2026_LoL_esports_match_data_from_OraclesElixir.csv"
 BASELINE_GROUPS = {"main": ["LCK", "LPL", "LEC", "LCS"], "lcp": ["LCP"]}   # each group is rated against its OWN baseline
 LEAGUES = [lg for grp in BASELINE_GROUPS.values() for lg in grp]            # leagues shown on the site
 INTERNATIONAL = ["MSI", "WLDs", "FST", "EWC"]          # league codes of international events
+# regional qualifiers filed under an international league code. They are shown on the site and count in the
+# overall rating (weight 1, rated against the team's home-league baseline), but not as international games.
+# EWC 2026: qualifiers Apr-Jun are playoffs=0, the main event in July is playoffs=1
+QUALIFIERS = {"EWC": lambda p: p["playoffs"] == 0}
 K = 12                 # small-sample shrinkage (use the K_USE printed by the baseline-check notebook)
 INTL_WEIGHT = 2.0      # one international game counts as this many domestic games in the overall rating
 TARGET_SD = 0.15       # typical spread of player ratings inside a role
@@ -53,15 +57,19 @@ ROLES = ["top", "jng", "mid", "bot", "sup"]
 
 
 def rate_baselines(df, cfg):
-    """Rates domestic games per baseline group and international games against their own baseline."""
+    """Rates domestic games per baseline group; international games and qualifiers each against their own baseline."""
     counts = df[df["position"] != "team"].groupby("league")["gameid"].nunique().sort_values(ascending=False)
     print("All league codes in the file and their game counts:")
     print(counts.to_string(), "\n")
 
-    def pool(leagues, label):
+    def pool(leagues, label, qualifiers=None):
+        """qualifiers=None: all games; False: without the QUALIFIERS games; True: only those."""
         parts = []
         for lg in leagues:
             p = rc.load_games(df, lg, include_playoffs=True)      # keep playoffs, they are tagged and filterable
+            if qualifiers is not None:
+                q = QUALIFIERS[lg](p) if lg in QUALIFIERS else pd.Series(False, index=p.index)
+                p = p[q] if qualifiers else p[~q]
             n = p["gameid"].nunique()
             if n < 10:
                 print(f"{label}: {lg} has only {n} complete games, skipped"); continue
@@ -69,17 +77,18 @@ def rate_baselines(df, cfg):
             print(f"{label}: {lg} {n} games")
         return pd.concat(parts, ignore_index=True) if parts else None
 
-    parts = []
+    parts, base_raw = [], {}
     for name, lgs in BASELINE_GROUPS.items():
         raw = pool(lgs, name)
         if raw is None or raw["gameid"].nunique() < 30:
             print(f"{name}: not enough games for its own baseline, skipped")
             continue
+        base_raw[name] = raw.copy()                               # kept to rate qualifier games against
         rated = rc.rate(raw, cfg)                                 # this group's own baseline
         print(f"{name}: baseline built from {rated['gameid'].nunique()} games; stats skipped: {rated.attrs.get('skipped_stats')}")
         parts.append(rated)
     dom = pd.concat(parts, ignore_index=True)
-    intl = pool(INTERNATIONAL, "international")
+    intl = pool(INTERNATIONAL, "international", qualifiers=False)
     if intl is not None and intl["gameid"].nunique() >= 30:
         intl = rc.rate(intl, cfg)                                 # separate international baseline
         print("stats skipped in the international baseline:", intl.attrs.get("skipped_stats"))
@@ -88,7 +97,48 @@ def rate_baselines(df, cfg):
         intl = None
     print("\nSplit labels per league (domestic), with playoffs flag:")
     print(dom.groupby(["league", "split", "playoffs"])["gameid"].nunique().to_string())
-    return dom, intl
+    qual = pool([lg for lg in INTERNATIONAL if lg in QUALIFIERS], "qualifiers", qualifiers=True)
+    if qual is not None:
+        qual = rate_qualifiers(df, qual, base_raw, pool, cfg)
+    return dom, intl, qual
+
+
+def home_leagues(df):
+    """teamid -> the non-international league the team played most games in (from the whole CSV)."""
+    t = df[(df["position"] == "team") & ~df["league"].isin(INTERNATIONAL)]
+    n = t.groupby(["teamid", "league"])["gameid"].nunique().reset_index()
+    return n.sort_values("gameid", ascending=False).drop_duplicates("teamid").set_index("teamid")["league"].to_dict()
+
+
+def rate_qualifiers(df, qual, base_raw, pool, cfg):
+    """Each qualifier player-game is rated against the baseline of the team's home league: the site's baseline
+    group if the league is on the site, else a baseline from that league's own games in the CSV.
+    The baselines are built from domestic games only, so the qualifier games don't change them.
+    A team with no home league in the file gets its opponent's (qualifiers are regional)."""
+    home = home_leagues(df)
+    qual = qual.copy()
+    qual["home"] = qual["teamid"].map(home)
+    opp_home = qual.groupby(["gameid", "teamname"])["home"].first()
+    for i in qual.index[qual["home"].isna()]:
+        other = opp_home.drop((qual.at[i, "gameid"], qual.at[i, "teamname"]), errors="ignore").loc[qual.at[i, "gameid"]]
+        qual.at[i, "home"] = other.dropna().iloc[0] if other.notna().any() else None
+    group_of = {lg: name for name, lgs in BASELINE_GROUPS.items() for lg in lgs}
+    qual["baseline"] = [group_of.get(h, h) if isinstance(h, str) else None for h in qual["home"]]
+
+    parts = []
+    for key, q in qual.groupby("baseline", dropna=False):
+        ref = base_raw.get(key) if isinstance(key, str) else None
+        if ref is None and isinstance(key, str):
+            ref = pool([key], f"qualifier baseline {key}")        # a league not on the site: its own games
+        if ref is None or ref["gameid"].nunique() < 30:
+            print(f"qualifiers: no baseline for {key} ({q['teamname'].unique().tolist()}), {len(q)} player-games skipped")
+            continue
+        both = pd.concat([ref.assign(_ref=True), q.drop(columns=["home", "baseline"]).assign(_ref=False)], ignore_index=True)
+        rated = rc.rate(both, cfg, ref=both["_ref"])
+        parts.append(rated[~rated["_ref"]].drop(columns="_ref"))
+        print(f"qualifiers: {q['gameid'].nunique()} games, {len(q)} player-games rated against the {key} baseline "
+              f"({ref['gameid'].nunique()} games): {', '.join(sorted(q['teamname'].unique()))}")
+    return pd.concat(parts, ignore_index=True) if parts else None
 
 
 def tidy(p, kind):
@@ -97,7 +147,7 @@ def tidy(p, kind):
         "player": p["playername"], "role": p["position"], "team": p["teamname"], "gameid": p["gameid"],
         "date": p["date"], "league": p["league"], "kind": kind,
         "stage": np.where(p["playoffs"] == 1, "playoffs", "regular"),
-        "split": p["split"],
+        "split": "Qualifier" if kind == "qualifier" else p["split"],
         "opponent": p["opponent"], "champion": p["champion"], "result": p["result"],
         "minutes": p["minutes"].round(1), "kills": p["kills"], "deaths": p["deaths"], "assists": p["assists"],
         "gd15": p["golddiffat15"],
@@ -200,7 +250,7 @@ def write_site_data(games, c_by_role, cfg, out_dir):
             key = f"{y}/{lg}"
             dump(os.path.join(out_dir, "games", str(y), f"{lg}.json"),
                  {"fields": GAME_FIELDS, "rows": rows_of(part[GAME_FIELDS]), "seq": part["seq"].tolist()})
-            files[key] = {"rows": int(len(part)), "kind": part["kind"].iloc[0]}
+            files[key] = {"rows": int(len(part)), "kinds": sorted(part["kind"].unique().tolist())}
             for k in dict.fromkeys(zip(part["player"], part["role"])):
                 pfiles[k].append(key)
 
@@ -234,9 +284,9 @@ def write_site_data(games, c_by_role, cfg, out_dir):
         "version": "0.2",
         "generated": datetime.now().isoformat(timespec="seconds"),
         "note": "Performance rating relative to the games it is built from. Not a measure of skill or of league strength.",
-        "config": {"leagues": LEAGUES, "baseline_groups": BASELINE_GROUPS, "international": INTERNATIONAL, "K": K, "intl_weight": INTL_WEIGHT,
+        "config": {"leagues": LEAGUES, "baseline_groups": BASELINE_GROUPS, "international": INTERNATIONAL, "qualifiers": sorted(QUALIFIERS), "K": K, "intl_weight": INTL_WEIGHT,
                    "min_games": MIN_GAMES_CALIBRATION, "target_sd": TARGET_SD, "c_by_role": c_by_role,
-                   "baselines": "domestic games: one baseline per group of leagues (see baseline_groups); international games: their own baseline",
+                   "baselines": "domestic games: one baseline per group of leagues (see baseline_groups); international games: their own baseline; qualifiers of international events: the baseline of each team's home league (a league not on the site: its own games), weight 1, not counted as international",
                    "formula": "rating = 1 + c(role) * sum(w * (game_rating - 1)) / (sum(w) + K)",
                    "early_weights": cfg["EARLY_WEIGHTS"], "late_groups": cfg["LATE_GROUPS"],
                    "late_weights": cfg["LATE_WEIGHTS"], "early_share": cfg["EARLY_SHARE"]},
@@ -248,11 +298,12 @@ def write_site_data(games, c_by_role, cfg, out_dir):
 def main(csv=FILE, out_dir=OUT_DIR, show_report=False):
     df = pd.read_csv(csv, low_memory=False)
     cfg = dict(rc.CFG)
-    dom, intl = rate_baselines(df, cfg)
-    games = pd.concat([tidy(dom, "domestic")] + ([tidy(intl, "international")] if intl is not None else []), ignore_index=True)
-    games = games.sort_values("date").reset_index(drop=True)
+    dom, intl, qual = rate_baselines(df, cfg)
+    games = pd.concat([tidy(dom, "domestic")] + [tidy(x, k) for x, k in [(intl, "international"), (qual, "qualifier")] if x is not None],
+                      ignore_index=True)
+    games = games.sort_values("date", kind="stable").reset_index(drop=True)
     print("rated player-games:", len(games), "| domestic:", int((games["kind"] == "domestic").sum()),
-          "| international:", int((games["kind"] == "international").sum()))
+          "| international:", int((games["kind"] == "international").sum()), "| qualifier:", int((games["kind"] == "qualifier").sum()))
     c_by_role = calibrate_c(games)
     os.makedirs(out_dir, exist_ok=True)
     table = default_table(games, c_by_role)
