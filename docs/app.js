@@ -10,7 +10,25 @@ const norm=s=>s.normalize('NFD').replace(/[\u0300-\u036f]/g,'');
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const f2=x=>x==null||isNaN(x)?'—':x.toFixed(2);
 const rc=x=>x>=1.15?'good':x<=0.9?'bad':'';
-const st={lg:LEAGUES.includes('LEC')?'LEC':LEAGUES[0],role:'all',all:0,pg:0};
+const INTL='INTL',LN=L=>L=='all'?'All leagues':L==INTL?'International':L;
+const st={lg:LEAGUES.includes('LEC')?'LEC':LEAGUES[0],role:'all',split:'all',stage:'all',year:'all',plg:'all',all:0,pg:0};
+const yr=g=>g[F.date].slice(0,4),YEARS=[...new Set(D.games.map(yr))].sort();
+
+// which games a league choice covers, and whether a game passes the current filters
+const inL=(g,L)=>L=='all'||(L==INTL?g[F.kind]=='international':g[F.league]==L&&g[F.kind]=='domestic');
+const keep=(g,L)=>inL(g,L)&&(st.split=='all'||(L==INTL?g[F.league]:g[F.period])==st.split)
+  &&(st.stage=='all'||g[F.stage]==st.stage)&&(st.year=='all'||yr(g)==st.year);
+const sp={};
+const splits=L=>sp[L]||(sp[L]=[...new Set(D.games.filter(g=>inL(g,L)).sort((a,b)=>a[F.date]<b[F.date]?-1:a[F.date]>b[F.date]?1:0)
+  .map(g=>L==INTL?g[F.league]:g[F.period]).filter(x=>x!=null))]);
+const HAS_INTL=D.games.some(g=>g[F.kind]=='international');
+// regional split names behind each common split name ("Winter" = LEC Versus, LCK Cup, ...)
+const RN={};
+if(F.split!=null)for(const g of D.games)if(g[F.kind]=='domestic'&&g[F.period]&&g[F.split]){const a=((RN[g[F.league]]=RN[g[F.league]]||{})[g[F.period]]=RN[g[F.league]][g[F.period]]||[]);if(!a.includes(g[F.split]))a.push(g[F.split])}
+const rname=(L,s)=>{const a=(RN[L]||{})[s];return a&&a.join('/')!=s?a.join('/'):''};
+const regions=s=>LEAGUES.filter(l=>(RN[l]||{})[s]).map(l=>l+' '+RN[l][s].join('/')).join(', ');
+const legend=()=>{const ss=[...new Set(LEAGUES.flatMap(splits))];
+  return ss.length&&Object.keys(RN).length?'Splits: '+ss.map(s=>s+' = '+regions(s)).join(' · ')+'.':''};
 
 const P={};
 for(const r of D.games){const k=r[F.player]+'|'+r[F.role];(P[k]=P[k]||{name:r[F.player],role:r[F.role],games:[]}).games.push(r)}
@@ -32,24 +50,54 @@ function rate(gs,m){
   const x=1+c*s/den,h=1.645*c*sd*Math.sqrt(w2)/den;
   return{x,lo:x-h,hi:x+h,n:v.length};
 }
+// min games: the configured minimum, lowered for small selections (one split) to half the most games anyone has in it
 const lb={};
 function board(L){
-  return lb[L]||(lb[L]=list.map(p=>{
-    const gs=p.games.filter(g=>g[F.league]==L&&g[F.kind]=='domestic');
-    return gs.length>=MIN?{p,team:gs[gs.length-1][F.team],r:rate(gs,F.r_overall)}:null;
-  }).filter(Boolean).sort((a,b)=>b.r.x-a.r.x));
+  const k=[L,st.split,st.stage,st.year].join('|');
+  if(lb[k])return lb[k];
+  const sel=list.map(p=>({p,gs:p.games.filter(g=>keep(g,L))})).filter(x=>x.gs.length);
+  const thr=Math.max(1,Math.min(MIN,Math.ceil(sel.reduce((a,x)=>Math.max(a,x.gs.length),0)/2)));
+  const rows=sel.filter(x=>x.gs.length>=thr).map(x=>({p:x.p,team:x.gs[x.gs.length-1][F.team],r:rate(x.gs,F.r_overall)}))
+    .filter(x=>x.r).sort((a,b)=>b.r.x-a.r.x);
+  return lb[k]={rows,thr};
 }
-function tabs(el,items,cur,fn){
-  el.innerHTML=items.map(([k,l])=>`<button class="${k==cur?'on':''}" data-k="${k}">${l}</button>`).join('');
-  el.onclick=e=>{const k=e.target.dataset.k;if(k)fn(k)};
+// short label of the current selection, e.g. "LEC · Winter (Versus) · Playoffs · 2026"
+function selection(L){
+  const s=[LN(L)];
+  if(st.split!='all'){const r=L==INTL?'':rname(L,st.split);s.push(st.split+(r?` (${r})`:''))}
+  if(st.stage!='all')s.push(st.stage=='playoffs'?'Playoffs':'Regular season');
+  if(st.year!='all')s.push(st.year);
+  return s.join(' · ');
+}
+function describe(L,thr){
+  return selection(L)+(st.stage=='all'?' · regular season and playoffs':' only')+(thr?` · players with ${thr}+ games`:'');
+}
+// shared filter bar: one row of dropdowns (league, split/event, stage, year, and role on the leaderboard)
+function filters(el,lgs,L,setL,redraw,roles){
+  const sl=splits(L),on=st.split!='all'||st.stage!='all'||st.year!='all'||(roles&&st.role!='all');
+  const note=L=='all'?regions(st.split):L!=INTL&&rname(L,st.split)?L+' '+rname(L,st.split):'';
+  const opt=(items,cur)=>items.map(([k,l,t])=>`<option value="${esc(k)}"${k==cur?' selected':''}${t?` title="${esc(t)}"`:''}>${esc(l)}</option>`).join('');
+  const sel=(id,label,items,cur)=>`<select id="${id}" aria-label="${label}" class="${cur!='all'&&id!='f-lg'?'on':''}">${opt(items,cur)}</select>`;
+  el.innerHTML=`<div class="fbar">
+  ${sel('f-lg','League',lgs.map(l=>[l,LN(l)]),L)}
+  ${sl.length?sel('f-sp',L==INTL?'Event':'Split',[['all',L==INTL?'All events':'All splits'],...sl.map(s=>{const r=L==INTL?'':rname(L,s);return[s,s,L=='all'?regions(s):r?`${L} calls it ${r}`:'']})],st.split):''}
+  ${sel('f-st','Stage',[['all','All stages'],['regular','Regular season'],['playoffs','Playoffs']],st.stage)}
+  ${sel('f-yr','Year',[['all','All years'],...YEARS.map(y=>[y,y])],st.year)}
+  ${roles?sel('f-rl','Role',[['all','All roles'],...Object.entries(RL)],st.role):''}
+  ${on?'<button class="link" id="f-reset">Reset</button>':''}</div>
+  ${sl.length&&st.split!='all'&&note?`<div class="mut sm fnote">${esc(st.split)} = ${esc(note)}</div>`:''}`;
+  const ch=(id,f)=>{const s=el.querySelector('#'+id);if(s)s.onchange=()=>{f(s.value);st.all=0;redraw()}};
+  ch('f-lg',k=>{setL(k);st.split='all'});
+  ch('f-sp',k=>st.split=k);ch('f-st',k=>st.stage=k);ch('f-yr',k=>st.year=k);ch('f-rl',k=>st.role=k);
+  const r=el.querySelector('#f-reset');if(r)r.onclick=()=>{st.split=st.stage=st.year='all';if(roles)st.role='all';st.all=0;redraw()};
 }
 
 function home(){
-  app.innerHTML=`<h1>Pro Player Ratings<small>v0.1</small></h1>
-  <div class="mut">Performance ratings built from per-game stats. 1.00 is an average performance in the games counted. This is not a measure of skill.</div>
-  <input id="q" type="search" placeholder="Search a player…" autocomplete="off"><div id="res"></div>
-  <h2>Regional leaderboard</h2><div class="tabs" id="lt"></div><div class="tabs" id="rt"></div><div class="tw" id="lb"></div><div id="mb"></div>
-  <p class="mut sm">Each board uses only that league’s games (regular season and playoffs) and players with ${MIN}+ games. Ranges are a ~90% interval.${BG}</p>`;
+  app.innerHTML=`<header class="top"><div><h1>Pro Player Ratings<small>v${esc(D.version||'0.1')}</small></h1>
+  <div class="mut sm">Performance ratings from per-game stats. 1.00 is an average performance in the games counted, not a measure of skill.</div></div>
+  <div class="srch"><input id="q" type="search" placeholder="Search a player…" autocomplete="off"><div id="res"></div></div></header>
+  <div id="fb"></div><div class="tw" id="lb"></div><div id="mb"></div>
+  <p class="mut sm" id="fn"></p><p class="mut sm">${esc(legend())}</p>`;
   const q=document.getElementById('q'),res=document.getElementById('res');
   q.oninput=()=>{
     const t=norm(q.value).toLowerCase().trim();
@@ -60,19 +108,31 @@ function home(){
   draw();
 }
 function draw(){
-  tabs(document.getElementById('lt'),LEAGUES.map(l=>[l,l]),st.lg,k=>{st.lg=k;st.all=0;draw()});
-  tabs(document.getElementById('rt'),[['all','All'],...Object.entries(RL)],st.role,k=>{st.role=k;st.all=0;draw()});
-  let rows=board(st.lg).filter(x=>st.role=='all'||x.p.role==st.role);
+  filters(document.getElementById('fb'),['all',...LEAGUES,...(HAS_INTL?[INTL]:[])],st.lg,k=>st.lg=k,draw,1);
+  const b=board(st.lg);
+  let rows=b.rows.filter(x=>st.role=='all'||x.p.role==st.role);
   const tot=rows.length;if(!st.all)rows=rows.slice(0,20);
-  document.getElementById('lb').innerHTML=`<table><tr><th>#</th><th>Player</th><th>Team</th><th>Role</th><th>Games</th><th>Rating</th></tr>`+
-    rows.map((x,i)=>`<tr><td>${i+1}</td><td><a href="#${x.p.slug}">${esc(x.p.name)}</a></td><td>${esc(x.team)}</td><td>${RL[x.p.role]}</td><td>${x.r.n}</td><td class="${rc(x.r.x)}"><b>${f2(x.r.x)}</b> <span class="mut sm">${f2(x.r.lo)}–${f2(x.r.hi)}</span></td></tr>`).join('')+`</table>`;
+  document.getElementById('lb').innerHTML=`<table class="lbt"><tr><th>#</th><th>Player</th><th>Games</th><th>Rating</th></tr>`+
+    (rows.length?rows.map((x,i)=>`<tr><td>${i+1}</td><td class="pl"><a href="#${x.p.slug}">${esc(x.p.name)}</a><div class="mut sub">${esc(x.team)} · ${RL[x.p.role]}</div></td><td>${x.r.n}</td><td class="${rc(x.r.x)}"><b class="rt">${f2(x.r.x)}</b> <span class="mut sm rng">${f2(x.r.lo)}–${f2(x.r.hi)}</span></td></tr>`).join('')
+    :`<tr><td colspan="4" class="mut">No players for these filters.</td></tr>`)+`</table>`;
   const mb=document.getElementById('mb');
   mb.innerHTML=tot>20&&!st.all?`<button class="more" id="more">Show all ${tot}</button>`:'';
   if(mb.firstChild)document.getElementById('more').onclick=()=>{st.all=1;draw()};
+  document.getElementById('fn').textContent=`${describe(st.lg,b.thr)}. Ranges are a ~90% interval.${st.lg==INTL?' International games are rated against their own baseline.':(st.lg=='all'&&st.split=='all'?` International games count ${C.intl_weight}×.`:'')+BG}`;
 }
 
 function playerPage(p){
-  const gs=p.games,dom=gs.filter(g=>g[F.kind]=='domestic'),intl=gs.filter(g=>g[F.kind]!='domestic'),n=gs.length;
+  const ls=[...LEAGUES.filter(l=>p.games.some(g=>inL(g,l))),...(p.games.some(g=>inL(g,INTL))?[INTL]:[])];
+  if(st.plg!='all'&&!ls.includes(st.plg))st.plg='all';
+  const gs=p.games.filter(g=>keep(g,st.plg)),dom=gs.filter(g=>g[F.kind]=='domestic'),intl=gs.filter(g=>g[F.kind]!='domestic'),n=gs.length;
+  const head=`<a href="#home">← All players</a>
+  <h1 style="margin-top:8px">${esc(p.name)}</h1>
+  <div class="mut">${RL[p.role]} · ${esc(p.team)} · ${[...new Set(p.games.map(g=>g[F.league]))].join(', ')}</div>`;
+  const redraw=()=>{st.pg=0;playerPage(p)},bar=()=>filters(document.getElementById('fb'),['all',...ls],st.plg,k=>st.plg=k,redraw);
+  if(!n){
+    app.innerHTML=head+`<div id="fb" style="margin-top:14px"></div><p class="mut">No games for this player in the selected filters. Change or reset the filters above.</p>`;
+    bar();return;
+  }
   const o=rate(gs,F.r_overall),d=dom.length?rate(dom,F.r_overall):null,i=intl.length?rate(intl,F.r_overall):null;
   const e=rate(gs,F.r_early),l=rate(gs,F.r_late);
   const sum=k=>gs.reduce((a,g)=>a+(g[F[k]]||0),0),gd=gs.filter(g=>g[F.gd15]!=null);
@@ -83,29 +143,30 @@ function playerPage(p){
   gs.forEach(g=>{const c=ch[g[F.champion]]=ch[g[F.champion]]||{n:0,w:0,k:0,d:0,a:0};c.n++;c.w+=g[F.result];c.k+=g[F.kills];c.d+=g[F.deaths];c.a+=g[F.assists]});
   const champs=Object.entries(ch).sort((a,b)=>b[1].n-a[1].n).slice(0,8);
   const rec=gs.slice().reverse(),shown=st.pg?rec:rec.slice(0,20);
-  const leagues=[...new Set(gs.map(g=>g[F.league]))].join(', ');
-  app.innerHTML=`<a href="#home">← All players</a>
-  <h1 style="margin-top:12px">${esc(p.name)}</h1>
-  <div class="mut">${RL[p.role]} · ${esc(p.team)} · ${leagues}</div>
-  <div class="cards">${card('Overall rating',o,1)}${card('Domestic',d)}${card('International',i)}</div>
+  const ev=g=>g[F.league]+(g[F.split]||g[F.period]?' '+esc(g[F.split]||g[F.period]):'')+(g[F.stage]=='playoffs'?' (playoffs)':'');
+  app.innerHTML=head+`
+  <div id="fb" style="margin-top:14px"></div>
+  <div class="cards">${card('Overall rating · '+esc(selection(st.plg)),o,1)}${card('Domestic',d)}${card('International',i)}</div>
   <p class="mut sm">Ranges are a ~90% interval. Overall counts international games ${C.intl_weight}× . Early game ${f2(e&&e.x)} · Late game ${f2(l&&l.x)}.</p>
   <h2>Stats</h2><div class="cards">
   ${stat('Games',n)}${stat('Win rate',(100*W/n).toFixed(0)+'%')}${stat('KDA',((K+A)/Math.max(De,1)).toFixed(2))}
   ${stat('K / D / A per game',(K/n).toFixed(1)+' / '+(De/n).toFixed(1)+' / '+(A/n).toFixed(1))}
-  ${stat('Gold diff @15',gd.length?Math.round(gd.reduce((a,g)=>a+g[F.gd15],0)/gd.length):'—')}
-  ${stat('Avg game length',(sum('minutes')/n).toFixed(0)+' min')}</div>
+  ${stat('Gold diff @15',gd.length?Math.round(gd.reduce((a,g)=>a+g[F.gd15],0)/gd.length):'—')}</div>
   <h2>Champions</h2><div class="tw"><table><tr><th>Champion</th><th>Games</th><th>Win rate</th><th>KDA</th></tr>
   ${champs.map(([c,v])=>`<tr><td>${esc(c)}</td><td>${v.n}</td><td>${(100*v.w/v.n).toFixed(0)}%</td><td>${((v.k+v.a)/Math.max(v.d,1)).toFixed(2)}</td></tr>`).join('')}</table></div>
-  <h2>Games</h2><div class="tw"><table><tr><th>Date</th><th>Event</th><th>vs</th><th>Champion</th><th></th><th>K/D/A</th><th>GD@15</th><th>Rating</th></tr>
-  ${shown.map(g=>`<tr><td>${g[F.date]}</td><td>${g[F.league]}${g[F.stage]=='playoffs'?' (playoffs)':''}</td><td>${esc(g[F.opponent]||'—')}</td><td>${esc(g[F.champion])}</td><td class="${g[F.result]?'good':'bad'}">${g[F.result]?'W':'L'}</td><td>${g[F.kills]}/${g[F.deaths]}/${g[F.assists]}</td><td>${g[F.gd15]==null?'—':Math.round(g[F.gd15])}</td><td class="${rc(g[F.r_overall])}"><b>${f2(g[F.r_overall])}</b></td></tr>`).join('')}</table></div>
-  ${!st.pg&&rec.length>20?`<button class="more" id="mg">Show all ${rec.length}</button>`:''}
-  <p class="mut sm">Time and tournament filters are coming later.</p>`;
+  <h2>Games</h2><div class="tw"><table><tr><th>Date</th><th>Rating</th><th></th><th>vs</th><th>Champion</th><th>K/D/A</th><th>GD@15</th><th>Event</th></tr>
+  ${shown.map(g=>`<tr><td>${g[F.date]}</td><td class="${rc(g[F.r_overall])}"><b>${f2(g[F.r_overall])}</b></td><td class="${g[F.result]?'good':'bad'}">${g[F.result]?'W':'L'}</td><td>${esc(g[F.opponent]||'—')}</td><td>${esc(g[F.champion])}</td><td>${g[F.kills]}/${g[F.deaths]}/${g[F.assists]}</td><td>${g[F.gd15]==null?'—':Math.round(g[F.gd15])}</td><td>${ev(g)}</td></tr>`).join('')}</table></div>
+  ${!st.pg&&rec.length>20?`<button class="more" id="mg">Show all ${rec.length}</button>`:''}`;
+  bar();
   const mg=document.getElementById('mg');if(mg)mg.onclick=()=>{st.pg=1;playerPage(p)};
 }
 
 function route(){
   const h=location.hash.slice(1),p=list.find(x=>x.slug==h);
-  st.pg=0;p?playerPage(p):home();window.scrollTo(0,0);
+  st.pg=0;
+  // a chosen split only makes sense with its league, so carry the league over in that case
+  if(p){st.plg=st.split!='all'&&p.games.some(g=>inL(g,st.lg))?st.lg:'all';playerPage(p)}else home();
+  window.scrollTo(0,0);
 }
 window.addEventListener('hashchange',route);route();
 })();
