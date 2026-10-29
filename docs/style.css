@@ -23,6 +23,7 @@ box-shadow:0 1px 2px rgba(0,0,0,.05);transition:border-color .15s,background-col
 .fbar select:hover{border-color:var(--mut)}.fbar select:focus-visible{outline:2px solid var(--ac);outline-offset:2px}
 .fbar select.on{color:var(--onac);background-color:var(--ac);border-color:var(--ac)}.fbar option{color:var(--fg);background:var(--card)}
 button.link{border:0;background:none;color:var(--ac);padding:8px 10px;font-size:15px;font-weight:500;border-radius:999px}button.link:hover{background:var(--acbg)}
+.tag{display:inline-block;font-size:11px;line-height:17px;padding:0 7px;border-radius:999px;background:var(--acbg);color:var(--ac);font-weight:600;white-space:nowrap;vertical-align:1px}
 table.lbt{min-width:0}.lbt td.pl{white-space:normal}.lbt .sub{font-size:12px}.lbt .rt{font-size:16px}
 .tw{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--card)}
 table{width:100%;border-collapse:collapse;min-width:520px}
@@ -36,5 +37,5 @@ th{font-size:12px;color:var(--mut);font-weight:600;text-transform:uppercase}tr:l
 .st{font-size:20px;font-weight:600}
 .more{margin-top:10px}
 footer{max-width:960px;margin:0 auto;padding:0 16px 32px;color:var(--mut);font-size:13px}
-@media (max-width:600px){.srch{flex-basis:100%}.fbar{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}.fbar select{width:100%;font-size:14px;padding:8px 26px 8px 12px;background-position:right 14px center,right 9px center}
+@media (max-width:600px){.srch{flex-basis:100%}.fbar{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}.fbar select{width:100%;font-size:14px;padding:8px 26px 8px 12px;background-position:right 14px center,right 9px center}.fbar #f-lg{grid-column:span 2}
 th,td{padding:8px}.lbt .rng{display:block;font-size:12px}}
