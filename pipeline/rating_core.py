@@ -1,6 +1,8 @@
 """
-Core of the LEC rating v0.1 as functions, so the same method can be run for several leagues.
-It mirrors lec_rating_v0_1.ipynb (same formula). Keep this file in the same folder as the notebook.
+Core of the rating v0.2 as functions, so the same method can be run for several leagues.
+v0.2 differs from lec_rating_v0_1.ipynb (which keeps the v0.1 formula): the player's own late kills
+count (late_killshare), gold diff weighs less in the early score, and the late game weighs more.
+Keep this file in the same folder as the notebooks.
 """
 import numpy as np
 import pandas as pd
@@ -8,12 +10,12 @@ import pandas as pd
 CFG = {
     "MIN_GAMES": 10, "K": 3, "GAME_SD": 0.25, "PLAYER_SD": 0.15,
     "EARLY_WEIGHTS": {
-        "golddiffat10": .15, "golddiffat15": .25,
-        "killsat15": .22, "assistsat15": .08, "deathsat15": .15,
+        "golddiffat10": .08, "golddiffat15": .15,
+        "killsat15": .28, "assistsat15": .12, "deathsat15": .15,
         "xpdiffat15": .10, "fb_score": .05,
     },
     "LATE_GROUPS": {
-        "fights":   ["late_kp", "late_deathshare", "damageshare", "dpm"],
+        "fights":   ["late_kp", "late_deathshare", "damageshare", "dpm", "late_killshare"],
         "swing":    ["gold_prog"],
         "vision":   ["vspm", "wpm", "wcpm", "cwpm"],
         "pressure": ["towerdmg_pm"],
@@ -25,7 +27,7 @@ CFG = {
         "bot": {"fights": .50, "swing": .30, "vision": .05, "pressure": .15},
         "sup": {"fights": .35, "swing": .15, "vision": .40, "pressure": .10},
     },
-    "EARLY_SHARE": {"top": .40, "jng": .35, "mid": .35, "bot": .35, "sup": .25},
+    "EARLY_SHARE": {"top": .30, "jng": .30, "mid": .25, "bot": .25, "sup": .20},
     "SIGNS": {"deathsat15": -1, "deathshare": -1, "late_deathshare": -1},
 }
 
@@ -87,6 +89,7 @@ def add_raw_stats(p):
     ok = (p["minutes"] > 18) & (late_tk > 0) & (late_td > 0)
     late_ka = (p["kills"] - p["killsat15"]) + (p["assists"] - p["assistsat15"])
     p["late_kp"] = (late_ka / late_tk).where(ok)
+    p["late_killshare"] = ((p["kills"] - p["killsat15"]) / late_tk).where(ok)
     p["late_deathshare"] = ((p["deaths"] - p["deathsat15"]) / late_td).where(ok)
     d15, d20, d25 = p["golddiffat15"], p["golddiffat20"], p["golddiffat25"]
     p["gold_prog"] = ((d25 - d15) / 10).where(d25.notna(), (d20 - d15) / 5)
