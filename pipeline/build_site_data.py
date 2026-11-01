@@ -392,10 +392,19 @@ def team_games(df, games, leagues, events):
     t = t.merge(other, on="gameid")
     t = t[t["ti"] != t["oi"]].sort_values(["date", "gameid", "side"], kind="stable").reset_index(drop=True)
 
-    # series: same league, same day, same two teams; the result is set on the team's last game of the series
-    day = t["date"].dt.strftime("%Y-%m-%d")
-    pair = [f"{min(a, b)}-{max(a, b)}" for a, b in zip(t["ti"], t["oi"])]
-    t["series"] = pd.factorize(pd.Series([f"{lg}|{d}|{p}" for lg, d, p in zip(t["league"], day, pair)]))[0]
+    # series: same league, same two teams, under 12 hours between games (so a series can run past midnight); such a
+    # run is split where the game number does not go up, unless no game number repeats in it (numbers out of order in
+    # the data); the result is set on the team's last game of the series
+    t["pair"] = [f"{lg}|{min(a, b)}-{max(a, b)}" for lg, a, b in zip(t["league"], t["ti"], t["oi"])]
+    gm = t.drop_duplicates("gameid")[["gameid", "pair", "date", "game"]].sort_values(["date", "gameid"], kind="stable")
+    prev = gm.groupby("pair")[["date", "game"]].shift()
+    run = (prev["date"].isna() | (gm["date"] - prev["date"] > pd.Timedelta(hours=12))).astype(int).groupby(gm["pair"]).cumsum()
+    rep = gm.groupby([gm["pair"], run])["game"].transform(lambda s: s.duplicated().any())
+    new = (run != run.groupby(gm["pair"]).shift()) | (rep & (gm["game"] <= prev["game"]))
+    gm["series"] = (new.astype(int).groupby(gm["pair"]).cumsum()).astype(str)
+    sid = (gm["pair"] + "|" + gm["series"]).set_axis(gm["gameid"])
+    t["series"] = pd.factorize(t["gameid"].map(sid))[0]
+    t = t.drop(columns="pair")
     sw = t.groupby(["series", "ti"])["result"].agg(["sum", "size"])
     t["s_result"] = None
     last = t.groupby(["series", "ti"]).tail(1).index
