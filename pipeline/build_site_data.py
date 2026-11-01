@@ -75,7 +75,7 @@ LEAGUE_NAMES = {
     "HLL": "Hellenic Legends League", "NLC": "Northern League of Legends Championship", "LPLOL": "Liga Portuguesa",
     "TCL": "Turkish Championship League", "LJL": "League of Legends Japan League", "HC": "Hitpoint Challengers",
     "AM": "Asia Masters", "AC": "Americas Cup",
-    "LTA N": "LTA North", "LTA S": "LTA South", "LTA": "LTA Cross-Conference", "LLA": "Liga Latinoamérica",
+    "LTA N": "LTA North", "LTA S": "LTA South", "LLA": "Liga Latinoamérica",
     "LCO": "League of Legends Circuit Oceania", "CBLOLA": "CBLOL Academy", "PCS": "Pacific Championship Series",
     "VCS": "Vietnam Championship Series", "LFL2": "LFL Division 2", "UL": "Ultraliga", "LVP SL": "LVP Superliga",
     "LDL": "LPL Development League",
@@ -98,6 +98,11 @@ SPLIT_MAP = {
 UNLABELLED = {"LCS": "Promotion"}   # LCS Oct 5-13, 2026: the LCS Promotion tournament (NA Challengers / LRN teams)
 # tournaments shown in another tier than their league's: (league, split) -> tier
 TOUR_TIERS = {("LCS", "Promotion"): "tier2"}
+# split names changed when the file is read: league -> {data split: split}, e.g. a placement stage filed as its own
+# split joins the split it belongs to
+MERGE_SPLITS = {}
+# split names by date for a league whose games have none: league -> [(from "MM-DD", to "MM-DD", split)]
+DATE_SPLITS = {}
 # the settings above that change by year (the ones above are REFERENCE_YEAR's): year -> {setting: value}.
 # use_year() switches to a year's settings.
 _TIER3 = TIERS["tier3"]
@@ -107,19 +112,25 @@ YEARS = {
            # LPL and LTA North have three splits that don't line up with the others: their own names
            "SPLIT_MAP": {("LEC", "Winter"): "Winter", ("LEC", "Spring"): "Spring", ("LEC", "Summer"): "Summer",
                          ("LCK", "Cup"): "Winter", ("LCK", "Rounds 1-2"): "Spring", ("LCK", "Rounds 3-5"): "Summer"},
-           "UNLABELLED": {}, "TOUR_TIERS": {}},
+           "UNLABELLED": {}, "TOUR_TIERS": {},
+           "MERGE_SPLITS": {"LPL": {"Split 2 Placements": "Split 2"}},
+           # the games between the LTA North and South conferences: the Split 1 playoffs and the LTA Championship
+           "DATE_SPLITS": {"LTA": [("01-01", "06-30", "Split 1 Playoffs"), ("07-01", "12-31", "Championship")]}},
     2024: {"TIERS": {"major": ["LCK", "LPL", "LEC", "LCS"], "tier1": ["CBLOL", "PCS", "VCS", "LJL", "LLA", "LCO"], "tier3": _TIER3},
            "BASELINE_GROUPS": {"main": ["LCK", "LPL", "LEC", "LCS"]},
            "SPLIT_MAP": {("LEC", "Winter"): "Winter", ("LEC", "Spring"): "Spring", ("LEC", "Summer"): "Summer",
                          ("LEC", "Finals"): None, ("LCK", "Spring"): "Spring", ("LCK", "Summer"): "Summer",
                          ("LCS", "Spring"): "Spring", ("LCS", "Summer"): "Summer"},
-           "UNLABELLED": {}, "TOUR_TIERS": {}},
+           "UNLABELLED": {}, "TOUR_TIERS": {},
+           "MERGE_SPLITS": {"LPL": {"Summer Placements": "Summer"}}, "DATE_SPLITS": {}},
 }
-YEARS[REFERENCE_YEAR] = {k: globals()[k] for k in ["TIERS", "BASELINE_GROUPS", "SPLIT_MAP", "UNLABELLED", "TOUR_TIERS"]}
+YEARS[REFERENCE_YEAR] = {k: globals()[k] for k in ["TIERS", "BASELINE_GROUPS", "SPLIT_MAP", "UNLABELLED", "TOUR_TIERS",
+                                                    "MERGE_SPLITS", "DATE_SPLITS"]}
 
 
 def use_year(y):
-    """Switches the year-dependent settings (TIERS, BASELINE_GROUPS, SPLIT_MAP, UNLABELLED, TOUR_TIERS) to year y."""
+    """Switches the year-dependent settings (TIERS, BASELINE_GROUPS, SPLIT_MAP, UNLABELLED, TOUR_TIERS, MERGE_SPLITS,
+    DATE_SPLITS) to year y."""
     globals().update(YEARS.get(y, YEARS[REFERENCE_YEAR]))
 
 
@@ -159,10 +170,24 @@ FORMATS = {
                            "stages": [_st("Group stage", "table", "Two groups; teams play the other group's teams.", **{"from": "01-14", "to": "02-01"}),
                                       _st("Play-In", "bracket", "", **{"from": "02-02", "to": "02-10"}),
                                       _st("Playoffs", "bracket", "Double elimination, best of 5.", **{"from": "02-11", "to": "03-01"})]},
-    (2026, "LCK", "Rounds 1-2"): {"about": "10 teams. After Rounds 1-2 the top five form the Legend group and the bottom five the Rise group for Rounds 3-4.",
-                                  "stages": _lg("Double round robin, best of 3.", "Playoffs for the MSI spots.")},
-    (2026, "LCK", "Rounds 3-4"): {"about": "Rounds 3-4 in the Legend and Rise groups (results carry over), then the Season Play-In and Season Playoffs, with Fearless Draft. The top three go to Worlds.",
-                                  "stages": _lg("Rounds 3-4: double round robin, best of 3, in the Legend and Rise groups (the table mixes both groups).", "Season Play-In and Season Playoffs: double elimination, best of 5.")},
+    (2026, "LCK", "Rounds 1-2"): {"about": "Regular season Rounds 1-2 (10 teams), then the Road to MSI playoffs for the MSI spots. After Rounds 1-2 the top five form the Legend group and the bottom five the Rise group for Rounds 3-4. The data files these games as \"Rounds 1-2\".",
+                                  "stages": [_st("Rounds 1-2", "table", "Double round robin, best of 3.", flag="regular"), _st("Road to MSI", "bracket", "Playoffs for the MSI spots.", flag="playoffs")]},
+    (2026, "LCK", "Rounds 3-4"): {"about": "Regular season Rounds 3-4 in the Legend and Rise groups (results carry over), then the Season Play-In and Season Playoffs, with Fearless Draft. The winner is the LCK champion; the top three go to Worlds. The data files these games as \"Rounds 3-4\".",
+                                  "stages": [_st("Rounds 3-4", "table", "Double round robin, best of 3, in the Legend and Rise groups (the table mixes both groups).", flag="regular"), _st("Season Play-In and Season Playoffs", "bracket", "Double elimination, best of 5.", flag="playoffs")]},
+    (2024, "LEC", "Finals"): {"about": "The LEC Season Finals for the 2024 splits. The data files these games as \"Finals\".",
+                              "stages": [_st("Bracket", "bracket", "", flag="playoffs")]},
+    (2024, "LPL", "Summer"): {"about": "A placements stage, then the regular season and playoffs. The data files the placement games as a split of their own (\"Summer Placements\").",
+                              "stages": [_st("Placements", "table", "", **{"from": "06-01", "to": "06-30"}),
+                                         _st("Regular season", "table", "", flag="regular", **{"from": "07-01", "to": "12-31"}),
+                                         _st("Playoffs", "bracket", "", flag="playoffs")]},
+    (2025, "LPL", "Split 2"): {"about": "A placements stage, then the regular season and playoffs. The data files the placement games as a split of their own (\"Split 2 Placements\").",
+                               "stages": [_st("Placements", "table", "", **{"from": "03-01", "to": "04-03"}),
+                                          _st("Regular season", "table", "", flag="regular", **{"from": "04-04", "to": "12-31"}),
+                                          _st("Playoffs", "bracket", "", flag="playoffs")]},
+    (2025, "LCK", "Rounds 1-2"): {"about": "Regular season Rounds 1-2 (10 teams), then the Road to MSI playoffs for the MSI spots. After Rounds 1-2 the teams split into the Legend and Rise groups for Rounds 3-5. The data files these games as \"Rounds 1-2\".",
+                                  "stages": [_st("Rounds 1-2", "table", "Double round robin, best of 3.", flag="regular"), _st("Road to MSI", "bracket", "Playoffs for the MSI spots.", flag="playoffs")]},
+    (2025, "LCK", "Rounds 3-5"): {"about": "Regular season Rounds 3-5 in the Legend and Rise groups, then the Season Play-In and Season Playoffs. The winner is the LCK champion. The data files these games as \"Rounds 3-5\".",
+                                  "stages": [_st("Rounds 3-5", "table", "Legend and Rise groups (the table mixes both groups).", flag="regular"), _st("Season Play-In and Season Playoffs", "bracket", "", flag="playoffs")]},
     (2026, "LPL", "Split 1"): {"about": "14 teams in three groups (Ascend, Perseverance, Nirvana). The top two go to First Stand.",
                                "stages": _lg("Double round robin in each group, best of 3 (the table mixes the groups).", "Play-In, then an eight-team double-elimination bracket, best of 5.")},
     (2026, "LPL", "Split 2"): {"about": "14 teams in two groups. The top two go to MSI.", "stages": _lg("Regular season in two groups, best of 3 (the table mixes the groups).", "Playoffs, best of 5.")},
@@ -186,6 +211,12 @@ FORMATS = {
     (2026, "CBLOL", "Split 1"): {"about": "The winner goes to MSI.", "stages": _lg("Single round robin, best of 3, Fearless Draft.", "Playoffs with Fearless Draft.")},
     (2026, "CBLOL", "Split 2"): {"about": "The top teams go to Worlds.", "stages": _lg("Single round robin, best of 3, Fearless Draft.", "Playoffs with Fearless Draft.")},
 }
+# tournament names where the data's split name is not what the league calls it: (year, league, split) -> name shown
+# (LCK since 2025: the data files the season as "Rounds 1-2" and "Rounds 3-5"/"3-4"; each ends with the playoffs
+# that decide its title)
+TOUR_NAMES = {(2024, "LEC", "Finals"): "Season Finals",
+              (2025, "LCK", "Rounds 1-2"): "Road to MSI", (2025, "LCK", "Rounds 3-5"): "Season Playoffs",
+              (2026, "LCK", "Rounds 1-2"): "Road to MSI", (2026, "LCK", "Rounds 3-4"): "Season Playoffs"}
 SPLIT_GAP_DAYS = 21    # unlabelled games: take the nearest labelled game's split within this many days
 OUT_DIR = "../docs/data"
 
@@ -205,6 +236,12 @@ TEAM_INDEX_FIELDS = ["name", "league", "games", "files"]
 TOUR_FIELDS = ["year", "league", "kind", "split", "period", "name", "first", "last", "teams", "series", "games", "champ", "runner",
                "done", "final", "playoffs", "format", "stages", "places", "tier"]
 ROLES = ["top", "jng", "mid", "bot", "sup"]
+# trophy cabinet (awards()): kind, tournament (index) or league, year, player, team, rating, games, detail
+AWARD_FIELDS = ["kind", "tour", "league", "year", "pi", "ti", "rating", "games", "detail"]
+# Tournament MVP: only players of top 4 teams; rating + this bonus by the team's final place (1st, 2nd, 3rd-4th) picks
+# the winner, so a player of a team that went further wins unless someone else rated clearly better (the rating shown
+# stays the real one)
+MVP_PLACE_BONUS = {1: 0.15, 2: 0.05, 3: 0.0, 4: 0.0}
 
 
 def tier_of(lg, y=None):
@@ -605,7 +642,7 @@ def tournaments(tg, fins):
     rows = []
     for (y, lg, kind, sp), c in t.groupby(["y", "league", "kind", "sp"], sort=False):
         f = fins[(int(y), lg, kind, sp)]
-        name = LEAGUE_NAMES.get(lg, lg) + ("" if sp == "None" else " " + sp)
+        name = LEAGUE_NAMES.get(lg, lg) + ("" if sp == "None" else " " + TOUR_NAMES.get((int(y), lg, sp), sp))
         per = c["period"].dropna()
         if kind == "domestic" and len(per) and per.iloc[0] != sp:
             name += f" ({per.iloc[0]})"                       # major leagues: the common split name too
@@ -673,8 +710,8 @@ def format_of(y, lg, kind, sp, c):
 
 def tournament_links(tg, tours):
     """Qualification paths, found from the teams that played both tournaments: [from, to, [teams]].
-    * International events and events: each team comes from the qualifier of the same event it played before (EWC
-      Qualifier -> EWC), else from the latest league split it played that was at least half played (by games) when
+    * International events and events: each team comes from the qualifier of the same event and year it played before
+      (EWC Qualifier -> EWC), else from the latest league split it played that was at least half played (by games) when
       the event started.
     * Finals stages of a league (EBL Finals, LES Final Four, VCS Finals): from the team's latest earlier split of that league.
     A link is kept when some, but not all, of the earlier tournament's teams went on (a real selection)."""
@@ -701,7 +738,7 @@ def tournament_links(tg, tours):
                 cand = [v for v in before if tours.at[v, "league"] == U["league"] and tours.at[v, "kind"] == "domestic"]
             else:
                 cand = [v for v in before if U["kind"] == "international" and tours.at[v, "league"] == U["league"]
-                        and tours.at[v, "kind"] == "event"] or [v for v in before if tours.at[v, "kind"] == "domestic"]
+                        and tours.at[v, "kind"] == "event" and tours.at[v, "year"] == U["year"]] or [v for v in before if tours.at[v, "kind"] == "domestic"]
             if cand:
                 v = max(cand, key=lambda v: (first[v], tours.at[v, "last"]))
                 src.setdefault(v, []).append(int(x))
@@ -709,6 +746,88 @@ def tournament_links(tg, tours):
             if 0 < len(xs) < len(teams_of[v]):
                 links.append([int(v), int(u), sorted(xs)])
     return links
+
+
+def awards(g_out, tg, tours, raw, c_by_role):
+    """The trophy cabinet. Results: champion and runner-up of every tournament with a champion, for the team and for
+    each player who played for it in that tournament (detail "final" if they played in the final series, else
+    "roster"; from the raw player rows, so tournaments without player ratings count too). Awards by rating (ours, not
+    official), for major-league splits and international events that have finished: Tournament MVP (highest rating +
+    MVP_PLACE_BONUS among players of top 4 teams with at least half of their team's games), Finals MVP (highest rating on the champion in the final
+    series), and per major league and year the Player of the Year (overall and per role; games of every split, at
+    least MIN_GAMES_CALIBRATION and half the most games anyone played there). Ratings: the leaderboard formula."""
+    def rating(g):
+        w = np.where(g["kind"] == "international", INTL_WEIGHT, 1.0)
+        r = g["r_overall"]
+        ok = r.notna().to_numpy()
+        a = pd.DataFrame({"pi": g["pi"], "role": g["role"], "ti": g["ti"], "wm": np.where(ok, w, 0.0),
+                          "wd": np.where(ok, w * (r.fillna(1.0) - 1), 0.0), "n": ok.astype(int)})
+        a = a.groupby("pi").agg(role=("role", "first"), ti=("ti", "last"), sw=("wm", "sum"), swd=("wd", "sum"), games=("n", "sum"))
+        a = a[a["games"] > 0]
+        a["rating"] = 1 + a["role"].map(c_by_role) * a["swd"] / (a["sw"] + K)
+        return a.sort_values("rating", ascending=False)
+
+    rows = []
+    key = lambda d: (int(d["year"]), d["league"], d["kind"], "None" if pd.isna(d["split"]) else d["split"])
+    tg_k = tg[tg["tour"]].assign(k=[key(r) for r in tg[tg["tour"]][["year", "league", "kind", "split"]].to_dict("records")])
+    g_k = g_out.assign(k=[key(r) for r in g_out[["year", "league", "kind", "split"]].to_dict("records")])
+    # raw player rows -> player index: by playerid + role, else name + role; team index by game and team name
+    by_id = dict(zip(zip(g_out["playerid"], g_out["role"]), g_out["pi"]))
+    by_name = dict(zip(zip(g_out["player"], g_out["role"]), g_out["pi"]))
+    ti_of = dict(zip(zip(tg["gameid"], tg["team"]), tg["ti"]))
+    raw = raw.assign(ti=[ti_of.get(k) for k in zip(raw["gameid"], raw["teamname"])])
+    raw = raw.assign(pi=[by_id.get((i, r)) if isinstance(i, str) and (i, r) in by_id else by_name.get((n, r))
+                         for i, n, r in zip(raw["playerid"], raw["playername"], raw["position"])])
+    raw = raw[raw["pi"].notna() & raw["ti"].notna()]
+    for i, e in tours.iterrows():
+        if pd.isna(e["champ"]):
+            continue
+        k = (int(e["year"]), e["league"], e["kind"], "None" if pd.isna(e["split"]) else e["split"])
+        c = tg_k[tg_k["k"] == k]
+        fin = set(c.loc[c["series"] == e["final"], "gameid"])
+        for kind, ti in (("champion", e["champ"]), ("runner_up", e["runner"])):
+            if pd.isna(ti):
+                continue
+            ti = int(ti)
+            rows.append([kind, i, e["league"], int(e["year"]), None, ti, None, None, None])
+            mine = raw[raw["gameid"].isin(set(c.loc[c["ti"] == ti, "gameid"])) & (raw["ti"] == ti)]
+            for pi, x in mine.groupby("pi"):
+                rows.append([kind, i, e["league"], int(e["year"]), int(pi), ti, None, int(x["gameid"].nunique()),
+                             "final" if fin & set(x["gameid"]) else "roster"])
+        if not (e["kind"] == "international" or (e["kind"] == "domestic" and e["tier"] == "major")):
+            continue
+        g = g_k[g_k["k"] == k]
+        if g.empty:
+            continue
+        team_games = c.groupby("ti")["gameid"].nunique()
+        a = rating(g)
+        a = a[a["games"] >= 0.5 * a["ti"].map(team_games).fillna(0)]
+        place = {ti: int(lab.split("–")[0].rstrip("stndrh")) for ti, lab in (e["places"] or [])}
+        a = a[a["ti"].map(lambda ti: place.get(ti, 99) <= 4)]
+        a = a.assign(score=a["rating"] + a["ti"].map(lambda ti: MVP_PLACE_BONUS[place[ti]])).sort_values("score", ascending=False)
+        if len(a):
+            rows.append(["mvp", i, e["league"], int(e["year"]), int(a.index[0]), int(a["ti"].iloc[0]),
+                         round(float(a["rating"].iloc[0]), 3), int(a["games"].iloc[0]), None])
+        f = rating(g[g["gameid"].isin(fin) & (g["ti"] == int(e["champ"]))])
+        if len(f):
+            rows.append(["finals_mvp", i, e["league"], int(e["year"]), int(f.index[0]), int(f["ti"].iloc[0]),
+                         round(float(f["rating"].iloc[0]), 3), int(f["games"].iloc[0]), None])
+    # Player of the Year: per major league and year (a year that is over: the data runs past its last league game)
+    for (y, lg), g in g_out[g_out["kind"] == "domestic"].groupby(["year", "league"]):
+        if tier_of(lg, int(y)) != "major":
+            continue
+        a = rating(g)
+        a = a[a["games"] >= max(MIN_GAMES_CALIBRATION, 0.5 * a["games"].max())]
+        if a.empty:
+            continue
+        rows.append(["poy", None, lg, int(y), int(a.index[0]), int(a["ti"].iloc[0]), round(float(a["rating"].iloc[0]), 3),
+                     int(a["games"].iloc[0]), None])
+        for role in ROLES:
+            b = a[a["role"] == role]
+            if len(b):
+                rows.append(["poy_role", None, lg, int(y), int(b.index[0]), int(b["ti"].iloc[0]),
+                             round(float(b["rating"].iloc[0]), 3), int(b["games"].iloc[0]), role])
+    return rows
 
 
 def player_keys(games):
@@ -834,7 +953,7 @@ def dump(path, obj):
         json.dump(obj, f, ensure_ascii=False, default=str, separators=(",", ":"))
 
 
-def write_site_data(games, c_by_role, cfg, out_dir, leagues, complete, tg, team_keys, elo_report, tours, links):
+def write_site_data(games, c_by_role, cfg, out_dir, leagues, complete, tg, team_keys, elo_report, tours, links, raw):
     """Writes index.json, summary/<year>.json, games/<year>/<league>.json and teams/<year>/<league>.json."""
     g_out = games[GAME_FIELDS + ["year", "playerid", "gameid"]].copy()
     # which team (index into the team list) each player-game belongs to
@@ -958,6 +1077,8 @@ def write_site_data(games, c_by_role, cfg, out_dir, leagues, complete, tg, team_
                    "names": {lg: LEAGUE_NAMES[lg] for lg in shown if lg in LEAGUE_NAMES},
                    # share of complete games (only leagues below 99.5%) per year; no complete games = no player ratings
                    "complete": {y: {lg: v for lg, v in complete[y].items() if lg in shown and v < 0.995} for y in years},
+                   # tournament names for data split names (TOUR_NAMES): league -> {split: name}
+                   "split_names": {lg: {sp: n for (_, l2, sp), n in TOUR_NAMES.items() if l2 == lg} for (_, lg, _) in TOUR_NAMES},
                    "reference_year": REFERENCE_YEAR, "baseline_groups": YEARS[REFERENCE_YEAR]["BASELINE_GROUPS"],
                    "baseline_groups_by_year": {y: YEARS.get(y, YEARS[REFERENCE_YEAR])["BASELINE_GROUPS"] for y in years}, "international": INTERNATIONAL, "qualifiers": sorted(QUALIFIERS),
                    "K": K, "intl_weight": INTL_WEIGHT,
@@ -971,6 +1092,7 @@ def write_site_data(games, c_by_role, cfg, out_dir, leagues, complete, tg, team_
         "team_fields": TEAM_FIELDS, "team_summary_fields": TEAM_SUMMARY_FIELDS,
         "teams": {"fields": TEAM_INDEX_FIELDS, "rows": trow},
         "tournaments": {"fields": TOUR_FIELDS, "rows": rows_of(tours[TOUR_FIELDS])}, "tournament_links": links,
+        "awards": {"fields": AWARD_FIELDS, "rows": awards(g_out, tg, tours, raw, c_by_role)},
         "elo": {k: v for k, v in elo_report.items() if k not in ("league_levels", "finals")} | {"league_levels": elo_report["league_levels"],
                 "base": team_elo.BASE, "weights": team_elo.WEIGHT, "title_bonus": team_elo.TITLE,
                 "decay": elo_report["decay"]},
@@ -986,6 +1108,13 @@ def main(pattern=FILES, out_dir=OUT_DIR, show_report=False):
         use_year(y)
         print(f"===== {y}: {csv}")
         df = pd.read_csv(csv, low_memory=False)
+        for lg, m in MERGE_SPLITS.items():
+            sel = df["league"] == lg
+            df.loc[sel, "split"] = df.loc[sel, "split"].replace(m)
+        for lg, rules in DATE_SPLITS.items():
+            md = df["date"].str[5:10]
+            for a, z, name in rules:
+                df.loc[(df["league"] == lg) & (md >= a) & (md <= z), "split"] = name
         dom, intl, ev, lg_y = rate_baselines(df, cfg)
         games = pd.concat([tidy(dom, "domestic")] + [tidy(x, k) for x, k in [(intl, "international"), (ev, "event")] if x is not None],
                           ignore_index=True)
@@ -1020,7 +1149,8 @@ def main(pattern=FILES, out_dir=OUT_DIR, show_report=False):
     os.makedirs(out_dir, exist_ok=True)
     table = default_table(games, c_ref, leagues)
     table.round(3).to_csv(os.path.join(out_dir, "players_default_view.csv"), index=False)
-    tg, team_keys, elo_report = team_games(team_parts, new_starters(pd.concat(player_rows, ignore_index=True)))
+    raw = pd.concat(player_rows, ignore_index=True)
+    tg, team_keys, elo_report = team_games(team_parts, new_starters(raw))
     print(f"team Elo: {len(team_keys)} teams, {elo_report['games']} games in {elo_report['series']} series, K {elo_report['k']}, "
           f"decay after {elo_report['decay'][0]} days, half-life {elo_report['decay'][1]} days, roster cut {elo_report['roster_cut']}, "
           f"series winner predicted {elo_report['accuracy']:.1%} (better series win rate so far: {elo_report['baseline_accuracy']:.1%})")
@@ -1030,7 +1160,7 @@ def main(pattern=FILES, out_dir=OUT_DIR, show_report=False):
     tours = tournaments(tg, elo_report["finals"])
     links = tournament_links(tg, tours)
     print(f"tournaments: {len(tours)}, {int(tours['champ'].notna().sum())} with a champion, {len(links)} qualification links")
-    write_site_data(games, c_ref, cfg, out_dir, leagues, complete, tg, team_keys, elo_report, tours, links)
+    write_site_data(games, c_ref, cfg, out_dir, leagues, complete, tg, team_keys, elo_report, tours, links, raw)
     sizes = {os.path.relpath(p, out_dir): os.path.getsize(p) / 1024
              for p in glob.glob(os.path.join(out_dir, "**", "*.json"), recursive=True)}
     for p in sorted(p for p in sizes if not p.startswith(("games", "teams"))):
