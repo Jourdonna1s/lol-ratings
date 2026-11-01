@@ -1,6 +1,6 @@
 # Pro player ratings
 
-pipeline/  rating code and notebooks (needs the Oracle's Elixir match-data CSV, not stored in git)
+pipeline/  rating code and notebooks (needs the Oracle's Elixir match-data CSVs, one per year, not stored in git)
 docs/      the website (static files). docs/data/ is written by pipeline/build_site_data.py
 
 ## Preview locally
@@ -9,8 +9,11 @@ docs/      the website (static files). docs/data/ is written by pipeline/build_s
 Open http://localhost:8000 (double-clicking index.html will not work, the browser blocks loading the data files).
 
 ## Update the ratings
-1. Put the CSV in pipeline/ and run, from pipeline/:
+1. Put the CSVs in pipeline/ (named <year>_LoL_esports_match_data_from_OraclesElixir.csv, as downloaded; the
+   2026 file is required, it sets the rating scale) and run, from pipeline/:
        python build_site_data.py
+   It reads every year's file. A new year also needs its settings in YEARS at the top of build_site_data.py
+   (tiers, baseline groups, common split names).
    (or open pipeline/lec_rating_site_data.ipynb and Run All, it runs the same script). It rewrites docs/data/.
 2. Preview, then commit on a branch and open a pull request into main:
        git checkout -b update-ratings

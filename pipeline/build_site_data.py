@@ -1,7 +1,7 @@
 """
 Builds the data the website reads (docs/data/), rating v0.2.
 
-    python build_site_data.py                 # 2026 file, writes ../docs/data
+    python build_site_data.py                 # every year's file in this folder, writes ../docs/data
     python build_site_data.py --csv FILE --out DIR --report
 
 Design
@@ -18,7 +18,13 @@ Design
       games/<year>/<lg>.json  every rated player-game of one league (player pages)
 * The rating is a performance rating relative to the games it is built from, not a measure of skill.
 
-Needs rating_core.py and the Oracle's Elixir match-data CSV in this folder.
+* Years: each year's file is rated on its own (its own baselines, tiers, split names: YEARS), and each year's game
+  ratings are put on the scale of REFERENCE_YEAR (the spread constant c(role) is calibrated per year), so adding a
+  year never changes another year's numbers. Players and teams are linked across years by Oracle's Elixir ids, and
+  the team Elo runs through all years in one go.
+
+Needs rating_core.py and the Oracle's Elixir match-data CSVs (<year>_LoL_esports_match_data_from_OraclesElixir.csv)
+in this folder.
 """
 import argparse, glob, json, os
 from datetime import datetime
@@ -29,33 +35,50 @@ import rating_core as rc
 import team_elo
 
 # ================= CONFIG =================
-FILE = "2026_LoL_esports_match_data_from_OraclesElixir.csv"
+FILES = "*_LoL_esports_match_data_from_OraclesElixir.csv"
+REFERENCE_YEAR = 2026     # game ratings of every year are put on this year's scale (its c(role))
 # leagues that share one baseline; every other league with enough games gets its own
 BASELINE_GROUPS = {"main": ["LCK", "LPL", "LEC", "LCS"], "lcp": ["LCP"]}
 MIN_BASELINE_GAMES = 30   # complete games a league needs for its own baseline (smaller leagues are left out)
 # league tiers shown on the site: major, tier 1, tier 2 (leagues not listed), tier 3
 TIERS = {"major": ["LCK", "LPL", "LEC", "LCS"],
          "tier1": ["LCP", "CBLOL"],
-         "tier3": ["LAS", "NL", "HC"]}
+         "tier3": ["LAS", "NL", "HC", "LFL2", "CBLOLA"]}
 INTERNATIONAL = ["MSI", "WLDs", "FST", "EWC"]          # league codes of international events
+MIN_TEAM_GAMES = 30   # games (complete or partial) a league needs to be on the team side (Elo, team pages, tournaments)
 # cross-league events (teams from several leagues): each team is rated against its home league's baseline,
 # counted with weight 1, and not as international games. They get their own leaderboard on the site.
-EVENTS = ["EM", "KeSPA Cup", "AM", "AC", "CCWS", "HW", "WSCI", "DCGI", "DCup", "WLRQ"]
+EVENTS = ["EM", "KeSPA Cup", "AM", "AC", "CCWS", "HW", "WSCI", "DCGI", "DCup", "WLRQ",
+          "AmCh", "CDF", "CT", "EPL", "GLLPA", "EBLPA", "IC", "NLC Aurora Open", "TSC", "USP", "PRMP",   # 2024
+          "ASI", "LTA"]   # 2025 (LTA: the games between the LTA North and South conferences)
 # regional qualifiers filed under an international league code: rated like EVENTS, shown as "<event> Qualifier"
 # EWC 2026: qualifiers Apr-Jun are playoffs=0, the main event in July is playoffs=1
 # Worlds: a region's own qualifier filed under WLDs (2026: the LPL qualifier of Sep 17-19) = the games before the
-# event's last break of 14+ days
+# event's last break of 14+ days, or before WORLDS_START
 def before_last_gap(p, days=14):
     d = pd.to_datetime(p["date"]).dt.normalize()
     u = np.sort(d.unique())
     gaps = np.where(np.diff(u) >= np.timedelta64(days, "D"))[0]
     return d < u[gaps[-1] + 1] if len(gaps) else pd.Series(False, index=p.index)
-QUALIFIERS = {"EWC": lambda p: p["playoffs"] == 0, "WLDs": before_last_gap}
+# Worlds start dates where the break rule doesn't work (2024: the LCK and LPL qualifiers end 11 days before the Play-In)
+WORLDS_START = {2024: "2024-09-25", 2025: "2025-10-14"}
+def worlds_qualifier(p):
+    d = pd.to_datetime(p["date"])
+    y = int(d.dt.year.mode().iloc[0]) if len(d) else None
+    return d < pd.Timestamp(WORLDS_START[y]) if y in WORLDS_START else before_last_gap(p)
+QUALIFIERS = {"EWC": lambda p: p["playoffs"] == 0, "WLDs": worlds_qualifier}
 # names shown on the site (codes not listed are shown as the code)
 LEAGUE_NAMES = {
     "LCKC": "LCK Challengers", "LAS": "LCK Academy Series", "NACL": "NA Challengers", "CD": "Circuito Desafiante", "PRM": "Prime League",
     "EBL": "Esports Balkan League", "ROL": "Road of Legends", "AL": "Arabian League", "RL": "Rift Legends",
     "HM": "Hitpoint Masters", "LRN": "Liga Regional Norte", "LRS": "Liga Regional Sur",
+    "HLL": "Hellenic Legends League", "NLC": "Northern League of Legends Championship", "LPLOL": "Liga Portuguesa",
+    "TCL": "Turkish Championship League", "LJL": "League of Legends Japan League", "HC": "Hitpoint Challengers",
+    "AM": "Asia Masters", "AC": "Americas Cup",
+    "LTA N": "LTA North", "LTA S": "LTA South", "LTA": "LTA Cross-Conference", "LLA": "Liga Latinoamérica",
+    "LCO": "League of Legends Circuit Oceania", "CBLOLA": "CBLOL Academy", "PCS": "Pacific Championship Series",
+    "VCS": "Vietnam Championship Series", "LFL2": "LFL Division 2", "UL": "Ultraliga", "LVP SL": "LVP Superliga",
+    "LDL": "LPL Development League",
     "EM": "EMEA Masters", "WLDs": "Worlds", "EWC": "Esports World Cup", "FST": "First Stand",
 }
 K = 12                 # small-sample shrinkage (use the K_USE printed by the baseline-check notebook)
@@ -75,6 +98,31 @@ SPLIT_MAP = {
 UNLABELLED = {"LCS": "Promotion"}   # LCS Oct 5-13, 2026: the LCS Promotion tournament (NA Challengers / LRN teams)
 # tournaments shown in another tier than their league's: (league, split) -> tier
 TOUR_TIERS = {("LCS", "Promotion"): "tier2"}
+# the settings above that change by year (the ones above are REFERENCE_YEAR's): year -> {setting: value}.
+# use_year() switches to a year's settings.
+_TIER3 = TIERS["tier3"]
+YEARS = {
+    2025: {"TIERS": {"major": ["LCK", "LPL", "LEC", "LTA N"], "tier1": ["LTA S", "LCP"], "tier3": _TIER3},
+           "BASELINE_GROUPS": {"main": ["LCK", "LPL", "LEC", "LTA N"], "lcp": ["LCP"]},
+           # LPL and LTA North have three splits that don't line up with the others: their own names
+           "SPLIT_MAP": {("LEC", "Winter"): "Winter", ("LEC", "Spring"): "Spring", ("LEC", "Summer"): "Summer",
+                         ("LCK", "Cup"): "Winter", ("LCK", "Rounds 1-2"): "Spring", ("LCK", "Rounds 3-5"): "Summer"},
+           "UNLABELLED": {}, "TOUR_TIERS": {}},
+    2024: {"TIERS": {"major": ["LCK", "LPL", "LEC", "LCS"], "tier1": ["CBLOL", "PCS", "VCS", "LJL", "LLA", "LCO"], "tier3": _TIER3},
+           "BASELINE_GROUPS": {"main": ["LCK", "LPL", "LEC", "LCS"]},
+           "SPLIT_MAP": {("LEC", "Winter"): "Winter", ("LEC", "Spring"): "Spring", ("LEC", "Summer"): "Summer",
+                         ("LEC", "Finals"): None, ("LCK", "Spring"): "Spring", ("LCK", "Summer"): "Summer",
+                         ("LCS", "Spring"): "Spring", ("LCS", "Summer"): "Summer"},
+           "UNLABELLED": {}, "TOUR_TIERS": {}},
+}
+YEARS[REFERENCE_YEAR] = {k: globals()[k] for k in ["TIERS", "BASELINE_GROUPS", "SPLIT_MAP", "UNLABELLED", "TOUR_TIERS"]}
+
+
+def use_year(y):
+    """Switches the year-dependent settings (TIERS, BASELINE_GROUPS, SPLIT_MAP, UNLABELLED, TOUR_TIERS) to year y."""
+    globals().update(YEARS.get(y, YEARS[REFERENCE_YEAR]))
+
+
 # tournament formats (hand-written from Riot's announcements and press coverage; the data has no format or stage
 # information beyond a playoffs flag on league games). Key: (year, league, split or None).
 # stages: name, type ("table": standings make sense, e.g. a round robin or Swiss; "bracket": series in order),
@@ -159,10 +207,12 @@ TOUR_FIELDS = ["year", "league", "kind", "split", "period", "name", "first", "la
 ROLES = ["top", "jng", "mid", "bot", "sup"]
 
 
-def tier_of(lg):
+def tier_of(lg, y=None):
+    """A league's tier, in year y (default: the year in use)."""
     if lg in INTERNATIONAL: return "international"
     if lg in EVENTS: return "event"
-    return next((t for t, lgs in TIERS.items() if lg in lgs), "tier2")
+    tiers = TIERS if y is None else YEARS.get(y, YEARS[REFERENCE_YEAR])["TIERS"]
+    return next((t for t, lgs in tiers.items() if lg in lgs), "tier2")
 
 
 def regular_leagues(df):
@@ -358,9 +408,18 @@ def label_splits(games):
     return games
 
 
-def team_games(df, games, leagues, events):
-    """One row per team per game for the leagues, events and international events on the site (partial games included).
-    Split labels come from the player games of the same game; partial games use their own label."""
+def team_leagues(df):
+    """Regular leagues with MIN_TEAM_GAMES games, complete or partial (LPL 2024-25 has only partial games): these are
+    on the team side (Elo, team pages, tournaments) even without player ratings."""
+    t = df[(df["position"] == "team") & ~df["league"].isin(INTERNATIONAL + EVENTS)]
+    n = t.groupby("league")["gameid"].nunique()
+    return n[n >= MIN_TEAM_GAMES].index.tolist()
+
+
+def team_rows(df, games, leagues, events, y):
+    """One row per team per game of one year's file (year y's settings in use) for the leagues, events and international
+    events on the site (partial games included). Split labels come from the player games of the same game; partial
+    games use their own label."""
     t = df[(df["position"] == "team") & df["league"].isin(leagues + events + INTERNATIONAL)].copy()
     t = t[t.groupby("gameid")["gameid"].transform("size") == 2]
     t["date"] = pd.to_datetime(t["date"])
@@ -386,7 +445,46 @@ def team_games(df, games, leagues, events):
 
     # team identity: teamid, else the name
     t["key"] = t["teamid"].where(t["teamid"].notna(), "name:" + t["teamname"].astype(str))
-    keys = list(dict.fromkeys(t["key"]))
+    # home league per team this year (for the Elo league level): its most played regular league, else its league here
+    home = home_leagues(df)
+    by_name = (df[(df["position"] == "team") & ~df["league"].isin(INTERNATIONAL + EVENTS)]
+               .groupby(["teamname", "league"])["gameid"].nunique().reset_index()
+               .sort_values("gameid", ascending=False).drop_duplicates("teamname").set_index("teamname")["league"])
+    t["home"] = [home.get(k) if not k.startswith("name:") else by_name.get(n) for k, n in zip(t["key"], t["teamname"])]
+    t["home"] = t["home"].where(t["home"].notna(), t["league"])
+    major_events = {lg for lg, c in t[t["kind"] == "event"].groupby("league") if any(tier_of(h) in ("major", "tier1") for h in c["home"])}
+    major_events -= set(QUALIFIERS)
+    # what a game counts for: international events by name, EM, other events, EWC qualifiers, leagues by tier
+    t["comp"] = np.where(t["kind"] == "international", t["league"],
+                         np.where(t["kind"] == "event", np.where(t["league"].isin(QUALIFIERS), "qualifier",
+                                                                 np.where(t["league"].isin(["EM", "WSCI"]), t["league"],
+                                                                          np.where(t["league"].isin(major_events), "event_major", "event"))),
+                                  t["league"].map(tier_of)))
+    t["tier"] = t["home"].map(tier_of)               # tier of the home league this year (Elo league-level prior)
+    return t
+
+
+def new_starters(df):
+    """(gameid, team key) -> how many of the team's players had not played for it in the last team_elo.ROSTER_DAYS days
+    (a team's first game counts 0). df: the player rows of every year."""
+    p = df[df["position"] != "team"][["gameid", "date", "teamid", "teamname", "playerid", "playername"]].copy()
+    p["key"] = p["teamid"].where(p["teamid"].notna(), "name:" + p["teamname"].astype(str))
+    p["who"] = p["playerid"].where(p["playerid"].notna(), "name:" + p["playername"].astype(str))
+    p["date"] = pd.to_datetime(p["date"])
+    p = p.sort_values(["date", "gameid"], kind="stable")
+    prev = p.groupby(["key", "who"])["date"].shift()
+    first = p["date"] == p.groupby("key")["date"].transform("min")
+    p["new"] = ((prev.isna() | (p["date"] - prev > pd.Timedelta(days=team_elo.ROSTER_DAYS))) & ~first).astype(int)
+    return p.groupby(["gameid", "key"])["new"].sum()
+
+
+def team_games(parts, roster):
+    """All years' team rows (from team_rows) in one table: team index, opponent, series, and the Elo through every year.
+    roster: new_starters()."""
+    t = pd.concat(parts, ignore_index=True)
+    t = t.sort_values(["date", "gameid", "side"], kind="stable").reset_index(drop=True)
+    # REFERENCE_YEAR's teams first, in their order, so their page addresses stay the same
+    keys = list(dict.fromkeys(list(t.loc[t["date"].dt.year == REFERENCE_YEAR, "key"]) + list(t["key"])))
     t["ti"] = t["key"].map({k: i for i, k in enumerate(keys)})
     other = t[["gameid", "ti", "teamname"]].rename(columns={"ti": "oi", "teamname": "opponent"})
     t = t.merge(other, on="gameid")
@@ -412,34 +510,26 @@ def team_games(df, games, leagues, events):
         w, n = sw.loc[(t.at[i, "series"], t.at[i, "ti"])]
         t.at[i, "s_result"] = 1 if w > n - w else 0 if w < n - w else None
 
-    # home league per team (for the Elo league level): its most played regular league, else its league here
-    home = home_leagues(df)
-    by_name = (df[(df["position"] == "team") & ~df["league"].isin(INTERNATIONAL + EVENTS)]
-               .groupby(["teamname", "league"])["gameid"].nunique().reset_index()
-               .sort_values("gameid", ascending=False).drop_duplicates("teamname").set_index("teamname")["league"])
-    t["home"] = [home.get(k) if not k.startswith("name:") else by_name.get(n) for k, n in zip(t["key"], t["teamname"])]
-    t["home"] = t["home"].where(t["home"].notna(), t["league"])
-
-    # Elo, one row per game (blue vs red)
+    # Elo, one row per game (blue vs red). League levels are per league and year ("LCK 2025"), from the home league's
+    # tier that year; in the season fit a team is one team per year (rosters change)
+    t["year"] = t["date"].dt.year
+    t["lvl"] = t["home"] + " " + t["year"].astype(str)
+    t["new"] = [roster.get((gid, k), 0) for gid, k in zip(t["gameid"], t["key"])]
     b = t[t["side"] == "Blue"].set_index("gameid")
     r = t[t["side"] == "Red"].set_index("gameid")
     order = b.index[b.index.isin(r.index)]
     g = pd.DataFrame({"blue": b.loc[order, "ti"].to_numpy(), "red": r.loc[order, "ti"].to_numpy(),
-                      "blue_lg": b.loc[order, "home"].to_numpy(), "red_lg": r.loc[order, "home"].to_numpy(),
-                      "blue_win": b.loc[order, "result"].to_numpy(dtype=float)}, index=order)
-    major_events = {lg for lg, c in t[t["kind"] == "event"].groupby("league") if any(tier_of(h) in ("major", "tier1") for h in c["home"])}
-    major_events -= set(QUALIFIERS)
-    # what a game counts for: international events by name, EM, other events, EWC qualifiers, leagues by tier
-    t["comp"] = np.where(t["kind"] == "international", t["league"],
-                         np.where(t["kind"] == "event", np.where(t["league"].isin(QUALIFIERS), "qualifier",
-                                                                 np.where(t["league"].isin(["EM", "WSCI"]), t["league"],
-                                                                          np.where(t["league"].isin(major_events), "event_major", "event"))),
-                                  t["league"].map(tier_of)))
+                      "blue_lg": b.loc[order, "lvl"].to_numpy(), "red_lg": r.loc[order, "lvl"].to_numpy(),
+                      "blue_win": b.loc[order, "result"].to_numpy(dtype=float),
+                      "blue_new": b.loc[order, "new"].to_numpy(), "red_new": r.loc[order, "new"].to_numpy()}, index=order)
+    g["blue_fit"] = [f"{i} {y}" for i, y in zip(g["blue"], b.loc[order, "year"])]
+    g["red_fit"] = [f"{i} {y}" for i, y in zip(g["red"], r.loc[order, "year"])]
     cb = t.drop_duplicates("gameid").set_index("gameid").loc[order, "comp"]
     g["weight"] = cb.map(team_elo.WEIGHT).to_numpy()
     g["series"] = b.loc[order, "series"].to_numpy()
     g["day"] = ((t.drop_duplicates("gameid").set_index("gameid").loc[order, "date"] - t["date"].min()).dt.total_seconds() / 86400).to_numpy()
-    prior = {lg: team_elo.prior_of(lg, tier_of(lg)) for lg in set(g["blue_lg"]) | set(g["red_lg"])}
+    lv = t.drop_duplicates("lvl").set_index("lvl")
+    prior = {v: team_elo.prior_of(lv.at[v, "home"], lv.at[v, "tier"]) for v in lv.index}
     # titles: the champion of each finished competition (see finals()) gets a bonus after the final
     pos = pd.Series(np.arange(len(order)), index=order)
     end = t["date"].max()
@@ -452,12 +542,12 @@ def team_games(df, games, leagues, events):
         titles.setdefault(pos[f["gameid"]], []).append((f["champ"], bonus))
         title_list.append([f["champ"], lg if kind == "international" else f"{lg} {sp}" if sp != "None" else lg,
                            f["date"].strftime("%Y-%m-%d"), bonus])
-    rb, rr, after_b, after_r, k, rep, now = team_elo.fit(g, prior, titles)
+    rb, rr, after_b, after_r, rep, now = team_elo.fit(g, prior, titles)
     rep["titles"] = title_list
     rep["finals"] = fins
-    # Elo now: after decay up to the last day in the file
+    # Elo now: after decay up to the last day in the data, at the league level of the team's latest year
     end_day = (end - t["date"].min()).total_seconds() / 86400
-    homes = t.drop_duplicates("ti").set_index("ti")["home"]
+    homes = t.groupby("ti")["lvl"].last()
     rep["now"] = {int(i): round(now(i, h, end_day)) for i, h in homes.items()}
     rep["as_of"] = end.strftime("%Y-%m-%d")
     eb = pd.Series(rb, index=order), pd.Series(after_b, index=order)
@@ -520,7 +610,7 @@ def tournaments(tg, fins):
         if kind == "domestic" and len(per) and per.iloc[0] != sp:
             name += f" ({per.iloc[0]})"                       # major leagues: the common split name too
         rows.append({"year": int(y), "league": lg, "kind": kind, "split": None if sp == "None" else sp, "name": name,
-                     "tier": TOUR_TIERS.get((lg, sp), tier_of(lg) if kind == "domestic" else None),
+                     "tier": YEARS.get(int(y), YEARS[REFERENCE_YEAR])["TOUR_TIERS"].get((lg, sp), tier_of(lg, int(y)) if kind == "domestic" else None),
                      "period": per.iloc[0] if len(per) else None,
                      "first": c["date"].min().strftime("%Y-%m-%d"), "last": c["date"].max().strftime("%Y-%m-%d"),
                      "teams": int(c["ti"].nunique()), "series": int(c["series"].nunique()), "games": int(c["gameid"].nunique()),
@@ -669,7 +759,7 @@ def rate_players(g, c_by_role, K=K, W=INTL_WEIGHT, z=1.645):
 
 
 def calibrate_c(games):
-    """Fixed spread constants c(role): calibrated once, on the first baseline group (the main leagues)."""
+    """Spread constants c(role) of one year: calibrated on its first baseline group (the main leagues)."""
     cal = list(BASELINE_GROUPS.values())[0]
     base = rate_players(games[(games["kind"] == "domestic") & games["league"].isin(cal)], {r: 1.0 for r in ROLES})
     q = base[base["games"] >= MIN_GAMES_CALIBRATION].copy()
@@ -756,19 +846,37 @@ def write_site_data(games, c_by_role, cfg, out_dir, leagues, complete, tg, team_
     g_out["gd15"] = g_out["gd15"].round(0)
     g_out[GAME_FIELDS].to_csv(os.path.join(out_dir, "games_rated.csv"), index=False)
 
-    # players: the same name + role is one player unless player_keys() splits it. Order: players with games in the
-    # BASELINE_GROUPS leagues or international events first, by first game there, then the rest by first game.
-    # The site gives page addresses in this order, so the players from before phase 1 keep theirs.
-    g_out["pk"] = player_keys(g_out)
-    pkey = list(zip(g_out["player"], g_out["role"], g_out["pk"]))
-    old = g_out["league"].isin([lg for lgs in BASELINE_GROUPS.values() for lg in lgs] + INTERNATIONAL).to_numpy()
+    # players of REFERENCE_YEAR: the same name + role is one player unless player_keys() splits it. Order: players
+    # with games in the BASELINE_GROUPS leagues or international events first, by first game there, then the rest by
+    # first game. The site gives page addresses in this order, so the players from before phase 1 keep theirs.
+    # Other years: a row joins the REFERENCE_YEAR player with its playerid and role, else the players are its playerid
+    # + role (name + role without an id), shown under their latest name, after the REFERENCE_YEAR players.
+    ref = (g_out["year"] == REFERENCE_YEAR).to_numpy()
+    rk = player_keys(g_out[ref].reset_index(drop=True))
+    pkey = [None] * len(g_out)
+    for j, i in enumerate(np.flatnonzero(ref)):
+        pkey[i] = (g_out.at[i, "player"], g_out.at[i, "role"], int(rk[j]))
+    by_id = {}
+    for i in np.flatnonzero(ref):
+        if isinstance(g_out.at[i, "playerid"], str):
+            by_id.setdefault((g_out.at[i, "playerid"], g_out.at[i, "role"]), []).append(pkey[i])
+    by_id = {k: max(set(v), key=v.count) for k, v in by_id.items()}
+    rest = np.flatnonzero(~ref)
+    own = [(g_out.at[i, "playerid"], g_out.at[i, "role"]) if isinstance(g_out.at[i, "playerid"], str)
+           else ("name:" + str(g_out.at[i, "player"]), g_out.at[i, "role"]) for i in rest]
+    latest = {k: g_out.at[i, "player"] for k, i in zip(own, rest)}          # rows are in date order: the last name wins
+    for k, i in zip(own, rest):
+        pkey[i] = by_id.get(k) or (latest[k], k[1], k[0])
+    old = (ref & g_out["league"].isin([lg for lgs in YEARS[REFERENCE_YEAR]["BASELINE_GROUPS"].values() for lg in lgs]
+                                      + INTERNATIONAL).to_numpy())
     first_old = dict.fromkeys(k for k, o in zip(pkey, old) if o)
-    players = list(first_old) + [k for k in dict.fromkeys(pkey) if k not in first_old]
+    first_ref = dict.fromkeys(k for k, o in zip(pkey, ref) if o and k not in first_old)
+    players = list(first_old) + list(first_ref) + [k for k in dict.fromkeys(pkey) if k not in first_old and k not in first_ref]
     pidx = {k: i for i, k in enumerate(players)}
     g_out["pi"] = [pidx[k] for k in pkey]
     game_fields = GAME_FIELDS + ["pi"]
 
-    years, files, pfiles = sorted(g_out["year"].unique().tolist()), {}, [[] for _ in players]
+    years, files, pfiles = sorted(set(g_out["year"]) | set(tg["year"])), {}, [[] for _ in players]
     tfiles = [[] for _ in team_keys]
     for y in years:
         gy = g_out[g_out["year"] == y].reset_index(drop=True)
@@ -829,7 +937,7 @@ def write_site_data(games, c_by_role, cfg, out_dir, leagues, complete, tg, team_
              int(n_games[i]), pfiles[i]] for i, (name, role, _) in enumerate(players)]
 
     # team index: name, home league (if on the site, else the league it played most here), team-games, files
-    tl = tg.groupby("ti").agg(name=("team", "last"), home=("home", "first"), games=("ti", "size"),
+    tl = tg.groupby("ti").agg(name=("team", "last"), home=("home", "last"), games=("ti", "size"),
                               most=("league", lambda s: s.mode().iloc[0]))
     trow = [[r["name"], r["home"] if r["home"] in leagues else r["most"], int(r["games"]), tfiles[i]]
             for i, r in tl.reindex(range(len(team_keys))).iterrows()]
@@ -843,10 +951,15 @@ def write_site_data(games, c_by_role, cfg, out_dir, leagues, complete, tg, team_
         "version": "0.2",
         "generated": datetime.now().isoformat(timespec="seconds"),
         "note": "Performance rating relative to the games it is built from. Not a measure of skill or of league strength.",
-        "config": {"leagues": leagues, "events": events, "tiers": {lg: tier_of(lg) for lg in shown},
+        "config": {"leagues": leagues, "events": events,
+                   # a league's tier in the latest year it played, and per year (tiers change: PCS was tier 1 in 2024)
+                   "tiers": {lg: tier_of(lg, max(y for y in complete if lg in complete[y])) for lg in shown},
+                   "tiers_by_year": {y: {lg: tier_of(lg, y) for lg in shown if lg in complete[y]} for y in years},
                    "names": {lg: LEAGUE_NAMES[lg] for lg in shown if lg in LEAGUE_NAMES},
-                   "complete": {lg: complete[lg] for lg in shown if lg in complete and complete[lg] < 0.995},
-                   "baseline_groups": BASELINE_GROUPS, "international": INTERNATIONAL, "qualifiers": sorted(QUALIFIERS),
+                   # share of complete games (only leagues below 99.5%) per year; no complete games = no player ratings
+                   "complete": {y: {lg: v for lg, v in complete[y].items() if lg in shown and v < 0.995} for y in years},
+                   "reference_year": REFERENCE_YEAR, "baseline_groups": YEARS[REFERENCE_YEAR]["BASELINE_GROUPS"],
+                   "baseline_groups_by_year": {y: YEARS.get(y, YEARS[REFERENCE_YEAR])["BASELINE_GROUPS"] for y in years}, "international": INTERNATIONAL, "qualifiers": sorted(QUALIFIERS),
                    "K": K, "intl_weight": INTL_WEIGHT,
                    "min_games": MIN_GAMES_CALIBRATION, "target_sd": TARGET_SD, "c_by_role": c_by_role,
                    "baselines": "each league its own baseline, except the leagues in baseline_groups, which share one; international games: their own baseline; events and qualifiers of international events: the baseline of each team's home league, weight 1, not counted as international",
@@ -860,39 +973,64 @@ def write_site_data(games, c_by_role, cfg, out_dir, leagues, complete, tg, team_
         "tournaments": {"fields": TOUR_FIELDS, "rows": rows_of(tours[TOUR_FIELDS])}, "tournament_links": links,
         "elo": {k: v for k, v in elo_report.items() if k not in ("league_levels", "finals")} | {"league_levels": elo_report["league_levels"],
                 "base": team_elo.BASE, "weights": team_elo.WEIGHT, "title_bonus": team_elo.TITLE,
-                "decay": [team_elo.DECAY_GRACE, team_elo.DECAY_HALF_LIFE]},
+                "decay": elo_report["decay"]},
     })
 
 
-def main(csv=FILE, out_dir=OUT_DIR, show_report=False):
-    df = pd.read_csv(csv, low_memory=False)
+def main(pattern=FILES, out_dir=OUT_DIR, show_report=False):
+    files = sorted(glob.glob(pattern), key=lambda f: (int(os.path.basename(f)[:4]) != REFERENCE_YEAR, f))
     cfg = dict(rc.CFG)
-    dom, intl, ev, leagues = rate_baselines(df, cfg)
-    games = pd.concat([tidy(dom, "domestic")] + [tidy(x, k) for x, k in [(intl, "international"), (ev, "event")] if x is not None],
-                      ignore_index=True)
-    games = games.sort_values("date", kind="stable").reset_index(drop=True)
-    games = label_splits(games)
-    print("rated player-games:", len(games), "| domestic:", int((games["kind"] == "domestic").sum()),
-          "| international:", int((games["kind"] == "international").sum()), "| events:", int((games["kind"] == "event").sum()))
-    print("splits per league:"); split_table(games)
-    c_by_role = calibrate_c(games)
+    parts, team_parts, player_rows, leagues, complete, c_ref, table = [], [], [], [], {}, None, None
+    for csv in files:                       # REFERENCE_YEAR first: its c(role) is the scale for the other years
+        y = int(os.path.basename(csv)[:4])
+        use_year(y)
+        print(f"===== {y}: {csv}")
+        df = pd.read_csv(csv, low_memory=False)
+        dom, intl, ev, lg_y = rate_baselines(df, cfg)
+        games = pd.concat([tidy(dom, "domestic")] + [tidy(x, k) for x, k in [(intl, "international"), (ev, "event")] if x is not None],
+                          ignore_index=True)
+        games = games.sort_values("date", kind="stable").reset_index(drop=True)
+        games = label_splits(games)
+        print("rated player-games:", len(games), "| domestic:", int((games["kind"] == "domestic").sum()),
+              "| international:", int((games["kind"] == "international").sum()), "| events:", int((games["kind"] == "event").sum()))
+        print("splits per league:"); split_table(games)
+        c_y = calibrate_c(games)
+        if c_ref is None:
+            if y != REFERENCE_YEAR:
+                raise SystemExit(f"the {REFERENCE_YEAR} file (REFERENCE_YEAR) is missing")
+            c_ref = c_y
+        else:                               # put this year's game ratings on REFERENCE_YEAR's scale
+            f = games["role"].map(lambda r: c_y[r] / c_ref[r])
+            for c in ["r_early", "r_late", "r_overall"]:
+                games[c] = (1 + (games[c] - 1) * f).round(6)
+        if show_report and y == REFERENCE_YEAR:
+            table = default_table(games, c_ref, lg_y)
+            report(table, games, pd.concat([x for x in [dom, intl] if x is not None], ignore_index=True), cfg)
+        t = df[df["position"] == "team"]
+        complete[y] = (t.drop_duplicates("gameid").groupby("league")["datacompleteness"]
+                       .agg(lambda s: round(float((s == "complete").mean()), 2))).to_dict()
+        t_lg = lg_y + [lg for lg in team_leagues(df) if lg not in lg_y]
+        leagues += [lg for lg in t_lg if lg not in leagues]
+        events = [lg for lg in EVENTS if lg in set(t["league"])]
+        team_parts.append(team_rows(df, games, t_lg, events, y))
+        player_rows.append(df.loc[df["position"] != "team", ["gameid", "date", "teamid", "teamname", "playerid", "playername", "position"]])
+        parts.append(games)
+    use_year(REFERENCE_YEAR)
+    games = pd.concat(parts, ignore_index=True).sort_values("date", kind="stable").reset_index(drop=True)
     os.makedirs(out_dir, exist_ok=True)
-    table = default_table(games, c_by_role, leagues)
+    table = default_table(games, c_ref, leagues)
     table.round(3).to_csv(os.path.join(out_dir, "players_default_view.csv"), index=False)
-    if show_report:
-        report(table, games, pd.concat([x for x in [dom, intl] if x is not None], ignore_index=True), cfg)
-    t = df[df["position"] == "team"]
-    complete = (t.drop_duplicates("gameid").groupby("league")["datacompleteness"].agg(lambda s: round(float((s == "complete").mean()), 2))).to_dict()
-    events = [lg for lg in EVENTS if lg in set(games.loc[games["kind"] == "event", "league"])]
-    tg, team_keys, elo_report = team_games(df, games, leagues, events)
+    tg, team_keys, elo_report = team_games(team_parts, new_starters(pd.concat(player_rows, ignore_index=True)))
     print(f"team Elo: {len(team_keys)} teams, {elo_report['games']} games in {elo_report['series']} series, K {elo_report['k']}, "
+          f"decay after {elo_report['decay'][0]} days, half-life {elo_report['decay'][1]} days, roster cut {elo_report['roster_cut']}, "
           f"series winner predicted {elo_report['accuracy']:.1%} (better series win rate so far: {elo_report['baseline_accuracy']:.1%})")
+    print("best settings (log loss, K, grace, half-life, roster cut):", elo_report["grid"][:5])
     if show_report:
         team_report(tg, elo_report)
     tours = tournaments(tg, elo_report["finals"])
     links = tournament_links(tg, tours)
     print(f"tournaments: {len(tours)}, {int(tours['champ'].notna().sum())} with a champion, {len(links)} qualification links")
-    write_site_data(games, c_by_role, cfg, out_dir, leagues, complete, tg, team_keys, elo_report, tours, links)
+    write_site_data(games, c_ref, cfg, out_dir, leagues, complete, tg, team_keys, elo_report, tours, links)
     sizes = {os.path.relpath(p, out_dir): os.path.getsize(p) / 1024
              for p in glob.glob(os.path.join(out_dir, "**", "*.json"), recursive=True)}
     for p in sorted(p for p in sizes if not p.startswith(("games", "teams"))):
@@ -906,8 +1044,10 @@ def main(csv=FILE, out_dir=OUT_DIR, show_report=False):
 
 
 if __name__ == "__main__":
+    import sys
+    sys.stdout.reconfigure(encoding="utf-8")     # team names outside the Windows code page, when printing to a file
     ap = argparse.ArgumentParser(description="Build docs/data for the ratings site.")
-    ap.add_argument("--csv", default=FILE, help="Oracle's Elixir match-data CSV")
+    ap.add_argument("--csv", default=FILES, help="Oracle's Elixir match-data CSV(s), a pattern (default: every year)")
     ap.add_argument("--out", default=OUT_DIR, help="output folder (docs/data)")
     ap.add_argument("--report", action="store_true", help="print the top 10 per role and checks per baseline")
     a = ap.parse_args()
