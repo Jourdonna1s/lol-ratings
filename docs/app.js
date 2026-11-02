@@ -92,7 +92,8 @@ TOURS.forEach(e=>{e.tier=e.tier||TIER[e.league];TK[[e.year,e.league,e.kind,e.spl
 // qualification paths: teams that played an earlier tournament and then this one (see tournament_links in the pipeline)
 (D.tournament_links||[]).forEach(([a,b,xs])=>{TOURS[a].to.push({e:TOURS[b],xs});TOURS[b].from.push({e:TOURS[a],xs})});
 // trophy cabinet (awards() in the pipeline): titles and runner-up finishes from results, and awards by rating (ours,
-// not official): Tournament MVP, Finals MVP, Player of the Year (overall and per role) per major league and year
+// not official): Tournament MVP, Finals MVP, Player of the Year (overall and per role) per major league and year;
+// official awards (kind "official", the award's name in detail) from OFFICIAL_AWARDS in the pipeline
 const AF={};((D.awards||{}).fields||[]).forEach((k,i)=>AF[k]=i);
 const AW=((D.awards||{}).rows||[]).map(r=>{const a={};for(const k in AF)a[k]=r[AF[k]];a.when=a.tour!=null?TOURS[a.tour].last:a.year+'-12-31';return a})
   .sort((a,b)=>b.when.localeCompare(a.when));
@@ -100,8 +101,10 @@ const RESULT=new Set(['champion','runner_up']),AWP={},AWT={},AWTP={},AWE={};
 for(const a of AW){
   if(a.pi!=null)(AWP[a.pi]=AWP[a.pi]||[]).push(a);else (AWT[a.ti]=AWT[a.ti]||[]).push(a);
   if(a.pi!=null&&!RESULT.has(a.kind)){(AWTP[a.ti]=AWTP[a.ti]||[]).push(a);if(a.tour!=null)(AWE[a.tour]=AWE[a.tour]||[]).push(a)}}
-const AWNAME=a=>a.kind=='poy_role'?'Best '+RL[a.detail]:{mvp:'Tournament MVP',finals_mvp:'Finals MVP',poy:'Player of the Year'}[a.kind];
+const OFF=a=>a.kind=='official';
+const AWNAME=a=>OFF(a)?a.detail:a.kind=='poy_role'?'Best '+RL[a.detail]:{mvp:'Tournament MVP',finals_mvp:'Finals MVP',poy:'Player of the Year'}[a.kind];
 const AW_NOTE='Awards by rating are our own picks from the performance ratings (major leagues and international events), not official awards.';
+const OFF_NOTE='Official awards are the leagues’ and events’ own (MVPs, All-Pro teams), taken from their announcements; not every year and league is covered yet.';
 const tourOf=g=>TK[[String(g[F.date]).slice(0,4),g[F.league],g[F.kind],g[F.split]??''].join('|')];
 const elink=(g,txt)=>{const e=tourOf(g);return e?`<a href="#${e.slug}">${txt}</a>`:txt};
 const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],dm=d=>MON[+d.slice(5,7)-1]+' '+(+d.slice(8,10));
@@ -394,13 +397,16 @@ function career(p){
 // every year, whatever the filters
 function cabinet(mine,mates){
   const what=a=>a.tour!=null?`<a href="#${TOURS[a.tour].slug}">${esc(TOURS[a.tour].short)} ${TOURS[a.tour].year}</a>`:`${esc(NAME(a.league))} ${a.year}`;
-  const res=k=>mine.filter(a=>a.kind==k),rated=mine.filter(a=>!RESULT.has(a.kind));
+  const res=k=>mine.filter(a=>a.kind==k),rated=mine.filter(a=>!RESULT.has(a.kind)&&!OFF(a)),off=mine.filter(OFF);
+  const pl=a=>`<a href="#${list[a.pi].slug}">${esc(list[a.pi].name)}</a>`;
   const sec=(t,xs,f)=>xs.length?`<div class="card cab"><div class="mut sm">${t}</div><div class="num2">${xs.length}</div><ul class="aw">${xs.map(f).join('')}</ul></div>`:'';
   const res1=a=>`<li>${what(a)}${a.detail=='roster'?' <span class="mut sm">(sub)</span>':''}</li>`;
   const aw1=(a,who)=>`<li><b>${AWNAME(a)}</b>${who?' · '+who:''} · ${what(a)} <span class="mut sm">${f2(a.rating)} in ${a.games} games</span></li>`;
-  const html=sec('Titles',res('champion'),res1)+sec('Runner-up',res('runner_up'),res1)+sec('Awards by rating',rated,a=>aw1(a))
-    +sec('Players’ awards by rating',mates||[],a=>aw1(a,`<a href="#${list[a.pi].slug}">${esc(list[a.pi].name)}</a>`));
-  return html?`<h2>Trophy cabinet</h2><div class="cards">${html}</div><p class="mut sm">All years. A title counts for every player who played for the team in that tournament (sub: did not play the final). ${AW_NOTE}</p>`:'';
+  const off1=(a,who)=>`<li><b>${esc(a.detail)}</b>${who?' · '+who:''} · ${what(a)}</li>`;
+  const html=sec('Titles',res('champion'),res1)+sec('Runner-up',res('runner_up'),res1)+sec('Official awards',off,a=>off1(a))
+    +sec('Players’ official awards',(mates||[]).filter(OFF),a=>off1(a,pl(a)))
+    +sec('Awards by rating',rated,a=>aw1(a))+sec('Players’ awards by rating',(mates||[]).filter(a=>!OFF(a)),a=>aw1(a,pl(a)));
+  return html?`<h2>Trophy cabinet</h2><div class="cards">${html}</div><p class="mut sm">All years. A title counts for every player who played for the team in that tournament (sub: did not play the final). ${OFF_NOTE} ${AW_NOTE}</p>`:'';
 }
 
 // Elo over the selected games: one 2px line, hairline grid, crosshair + tooltip snapping to the nearest game
@@ -624,7 +630,8 @@ function tourPage(e){
   <h1 style="margin-top:8px">${esc(e.name)} ${e.year}</h1>
   <div class="mut">${kind}${e.kind=='domestic'?etag(e):''} · ${dates(e)} · ${e.teams} teams${canBoard?` · <button class="link sm" data-go="players">Player leaderboard</button><button class="link sm" data-go="teams">Team leaderboard</button>`:''}</div>
   <div class="cards"><div class="card main"><div class="mut sm">Champion</div><div class="num2">${champOf(e)}</div><div class="mut sm">${e.runner!=null&&teams[e.runner]?'Runner-up '+tlink(teams[e.runner].name,e.runner):e.done?'No best-of-5 final in the data':'Still being played in the data'}</div></div>
-    ${(AWE[e.i]||[]).map(a=>`<div class="card"><div class="mut sm">${AWNAME(a)} <span title="${esc(AW_NOTE)}">(by rating)</span></div><div class="num2"><a href="#${list[a.pi].slug}">${esc(list[a.pi].name)}</a></div><div class="mut sm">${f2(a.rating)} in ${a.games} games · ${tlink(teams[a.ti]?teams[a.ti].name:'',a.ti)}</div></div>`).join('')}
+    ${Object.entries((AWE[e.i]||[]).filter(OFF).reduce((o,a)=>((o[a.detail]=o[a.detail]||[]).push(a),o),{})).map(([lab,xs])=>`<div class="card"><div class="mut sm">${esc(lab)} <span title="${esc(OFF_NOTE)}">(official)</span></div><div class="${xs.length>1?'':'num2'}">${xs.map(a=>`<a href="#${list[a.pi].slug}">${esc(list[a.pi].name)}</a>`).join(', ')}</div>${xs.length==1?`<div class="mut sm">${tlink(teams[xs[0].ti]?teams[xs[0].ti].name:'',xs[0].ti)}</div>`:''}</div>`).join('')}
+    ${(AWE[e.i]||[]).filter(a=>!OFF(a)).map(a=>`<div class="card"><div class="mut sm">${AWNAME(a)} <span title="${esc(AW_NOTE)}">(by rating)</span></div><div class="num2"><a href="#${list[a.pi].slug}">${esc(list[a.pi].name)}</a></div><div class="mut sm">${f2(a.rating)} in ${a.games} games · ${tlink(teams[a.ti]?teams[a.ti].name:'',a.ti)}</div></div>`).join('')}
     <div class="card"><div class="mut sm">Games</div><div class="num2">${N}</div><div class="mut sm">${series.length} series</div></div>
     <div class="card"><div class="mut sm">Blue side wins</div><div class="num2">${blue.length?Math.round(100*bw/blue.length)+'%':'—'}</div><div class="mut sm">${bw}-${blue.length-bw}</div></div>
     <div class="card"><div class="mut sm">Average game</div><div class="num2">${lmean.length?(lmean.reduce((a,b)=>a+b,0)/lmean.length).toFixed(1):'—'}</div><div class="mut sm">minutes</div></div></div>
