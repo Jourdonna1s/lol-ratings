@@ -86,7 +86,7 @@ LEAGUE_NAMES = {
     "CDF": "Coupe de France", "CT": "Circuito Tormenta", "DCGI": "Demacia Cup Global Invitational",
     "DCup": "Demacia Cup", "EBLPA": "EBL Pro-Am", "EPL": "European Pro League", "GLLPA": "GLL Pro-Am",
     "HW": "Hitpoint Winter", "IC": "Iberian Cup", "PRMP": "Prime League Pokal", "TSC": "TCL Season Cup",
-    "USP": "Ultraliga Super Puchar", "WSCI": "World Star Challengers Invitational",
+    "USP": "Ultraliga Super Puchar", "WSCI": "World Star Challengers Invitational", "WLRQ": "WSCI China Qualifier",
 }
 K = 12                 # small-sample shrinkage (use the K_USE printed by the baseline-check notebook)
 INTL_WEIGHT = 2.0      # one international game counts as this many domestic games in the overall rating
@@ -244,13 +244,21 @@ FORMATS = {
     (2025, "LEC", "Spring"): {"about": "10 teams, Fearless Draft. The top two go to MSI.",
                               "stages": _lg("Single round robin, best of 3; the top six go to the playoffs.", "Double elimination, best of 5.")},
     (2025, "LEC", "Summer"): {"about": "10 teams, Fearless Draft. The top three go to Worlds.",
-                              "stages": _lg("Group stage, best of 3 (the table mixes the groups).", "Double elimination, best of 5.")},
+                              "stages": _lg("Two groups of five, best of 3; the top eight go to the playoffs, the top two of each group in the upper bracket (the table mixes the groups).", "Double elimination, best of 5.")},
     (2025, "LTA N", "Split 1"): {"about": "The LTA North conference's part of Split 1, Fearless Draft. The top four go to the LTA Split 1 Playoffs.",
                                  "stages": [_st("Conference stage", "bracket", "", **{"from": "01-01", "to": "12-31"})]},
     (2025, "LTA S", "Split 1"): {"about": "The LTA South conference's part of Split 1, Fearless Draft. The top four go to the LTA Split 1 Playoffs.",
                                  "stages": [_st("Conference stage", "bracket", "", **{"from": "01-01", "to": "12-31"})]},
     (2025, "LTA", "Split 1 Playoffs"): {"about": "The top four teams of each LTA conference. The winner goes to First Stand.",
                                         "stages": [_st("Bracket", "bracket", "Single elimination.", **{"from": "01-01", "to": "12-31"})]},
+    (2025, "LTA N", "Split 2"): {"about": "8 teams, Fearless Draft. The winner goes to MSI.",
+                                 "stages": [_st("Positioning", "table", "Single round robin, best of 1; the standings set the groups.", flag="regular", **{"from": "01-01", "to": "04-23"}),
+                                            _st("Group stage", "table", "Two groups of four, single round robin, best of 3; the top six go to the playoffs (the table mixes the groups).", flag="regular", **{"from": "04-24", "to": "12-31"}),
+                                            _st("Playoffs", "bracket", "Double elimination, best of 5.", flag="playoffs")]},
+    (2025, "LTA S", "Split 2"): {"about": "8 teams, Fearless Draft. The winner goes to MSI.",
+                                 "stages": [_st("Positioning", "table", "Single round robin, best of 1; the standings set the groups.", flag="regular", **{"from": "01-01", "to": "04-23"}),
+                                            _st("Group stage", "table", "Two groups of four, single round robin, best of 3; the top six go to the playoffs (the table mixes the groups).", flag="regular", **{"from": "04-24", "to": "12-31"}),
+                                            _st("Playoffs", "bracket", "Double elimination, best of 5.", flag="playoffs")]},
     (2025, "LTA N", "Split 3"): {"about": "Fearless Draft. Teams pick their opponents for the following week (Pick & Play).",
                                  "stages": [_st("Regular season", "table", "Best of 3.", **{"from": "07-26", "to": "08-10"}),
                                             _st("Playoffs", "bracket", "Best of 5.", **{"from": "08-11", "to": "09-07"})]},
@@ -288,13 +296,39 @@ FORMATS = {
                               "stages": _lg("Double round robin, best of 1; the top six go to the playoffs.", "Double elimination, best of 5.")},
     (2024, "LCS", "Summer"): {"about": "8 teams. The top three of the LCS Championship (the playoffs) go to Worlds.",
                               "stages": _lg("Single round robin, best of 3; the top six go to the LCS Championship.", "Double elimination with a lower-bracket gauntlet; the top two seeds get a first-round bye.")},
+    (2024, "CBLOL", "Split 1"): {"about": "10 teams. The winner goes to MSI.",
+                                 "stages": _lg("Double round robin, best of 1; the top six go to the playoffs.", "Double elimination, best of 5.")},
+    (2024, "CBLOL", "Split 2"): {"about": "10 teams. The winner goes to Worlds.",
+                                 "stages": _lg("Double round robin, best of 1; the top six go to the playoffs.", "Double elimination, best of 5.")},
+    (2024, "PCS", "Spring"): {"about": "8 PCS teams. The PCS Playoffs add the top three LJL teams and the top two LCO teams to the top six PCS teams; the winner goes to MSI.",
+                              "stages": _lg("PCS teams only.", "The PCS Spring Playoffs, with the LJL and LCO teams.")},
+    (2024, "PCS", "Summer"): {"about": "7 PCS teams. The PCS Playoffs add the top three LJL teams and the top two LCO teams; the top two go to Worlds.",
+                              "stages": _lg("PCS teams only.", "The PCS Summer Playoffs, with the LJL and LCO teams.")},
+    (2024, "VCS", "Spring"): {"about": "8 teams. The winner goes to MSI.",
+                              "stages": _lg("Double round robin, best of 3; the top six go to the playoffs.", "Double elimination.")},
+    (2024, "VCS", "Summer"): {"about": "7 teams. The winner goes to Worlds as the VCS first seed.",
+                              "stages": _lg("Double round robin; the top five go to the playoffs.", "")},
+    (2024, "LJL", "Spring"): {"about": "6 teams. The top three go to the PCS Spring Playoffs.",
+                              "stages": _lg("Double round robin, two games per meeting (best of 2); the top four go to the playoffs.", "Single elimination, best of 5.")},
+    (2024, "LJL", "Summer"): {"about": "6 teams. The top three go to the PCS Summer Playoffs, for the Worlds spots.",
+                              "stages": _lg("Double round robin, two games per meeting (best of 2); the top five go to the playoffs.", "Single elimination, best of 5.")},
+    (2024, "LCO", "Split 1"): {"about": "8 teams. The top two go to the PCS Spring Playoffs.",
+                               "stages": _lg("Single round robin, best of 2; the top six go to the playoffs.", "Double elimination.")},
+    (2024, "LCO", "Split 2"): {"about": "8 teams. The top two go to the PCS Summer Playoffs, for the Worlds spots.",
+                               "stages": _lg("Single round robin, best of 2; the top six go to the playoffs.", "Double elimination.")},
+    (2024, "LLA", "Opening"): {"about": "7 teams. The winner goes to MSI.",
+                               "stages": _lg("Double round robin, best of 3; the top six go to the playoffs.", "")},
+    (2024, "LLA", "Closing"): {"about": "6 teams. The winner goes to Worlds.", "stages": _LEAGUE},
 }
 # tournament names where the data's split name is not what the league calls it: (year, league, split) -> name shown
 # (LCK since 2025: the data files the season as "Rounds 1-2" and "Rounds 3-5"/"3-4"; each ends with the playoffs
 # that decide its title)
 TOUR_NAMES = {(2024, "LEC", "Finals"): "Season Finals",
               (2025, "LCK", "Rounds 1-2"): "Road to MSI", (2025, "LCK", "Rounds 3-5"): "Season Playoffs",
-              (2026, "LCK", "Rounds 1-2"): "Road to MSI", (2026, "LCK", "Rounds 3-4"): "Season Playoffs"}
+              (2026, "LCK", "Rounds 1-2"): "Road to MSI", (2026, "LCK", "Rounds 3-4"): "Season Playoffs",
+              # "" = the league name alone: one tournament a year, filed under a season name or the year
+              (2024, "DCup", "Season"): "", (2025, "DCup", "Season"): "", (2026, "DCup", "Season"): "",
+              (2024, "LRN", "2024"): "", (2024, "LRS", "2024"): ""}
 SPLIT_GAP_DAYS = 21    # unlabelled games: take the nearest labelled game's split within this many days
 OUT_DIR = "../docs/data"
 
@@ -314,6 +348,99 @@ TEAM_INDEX_FIELDS = ["name", "league", "games", "files"]
 TOUR_FIELDS = ["year", "league", "kind", "split", "period", "name", "first", "last", "teams", "series", "games", "champ", "runner",
                "done", "final", "playoffs", "format", "stages", "places", "tier"]
 ROLES = ["top", "jng", "mid", "bot", "sup"]
+# official awards, written by hand from the leagues' announcements and press coverage (only awards the sources agree
+# on): (year, league, split, award, [players]). split: the tournament's data split name (None for an international
+# event or event), or "*" for an award of the league's whole year (e.g. the LCK's regular-season MVP from 2025).
+# Players by name as in the data; each is found among the players of that tournament (or league and year).
+OFFICIAL_AWARDS = [
+    # international events
+    (2024, "MSI", None, "Finals MVP", ["Lehends"]),
+    (2024, "EWC", None, "MVP", ["Faker"]),
+    (2024, "WLDs", None, "Finals MVP", ["Faker"]),
+    (2025, "FST", None, "Finals MVP", ["Zeka"]),
+    (2025, "MSI", None, "MVP", ["Chovy"]),
+    (2025, "EWC", None, "MVP", ["Kiin"]),
+    (2025, "WLDs", None, "Finals MVP", ["Gumayusi"]),
+    (2026, "FST", None, "Finals MVP", ["Bin"]),
+    (2026, "MSI", None, "Finals MVP", ["Zeus"]),
+    (2026, "EWC", None, "MVP", ["Smash"]),
+    # LCK
+    (2024, "LCK", "Spring", "Regular season MVP", ["Chovy"]),
+    (2024, "LCK", "Spring", "All-LCK 1st team", ["Kiin", "Canyon", "Chovy", "Peyz", "Keria"]),
+    (2024, "LCK", "Spring", "All-LCK 2nd team", ["Zeus", "Oner", "Faker", "Viper", "Lehends"]),
+    (2024, "LCK", "Spring", "All-LCK 3rd team", ["Doran", "Peanut", "Zeka", "Gumayusi", "Delight"]),
+    (2024, "LCK", "Summer", "Regular season MVP", ["Chovy"]),
+    (2024, "LCK", "Summer", "All-LCK 1st team", ["Kiin", "Canyon", "Chovy", "Peyz", "Lehends"]),
+    (2024, "LCK", "Summer", "All-LCK 2nd team", ["Doran", "Peanut", "Zeka", "Viper", "Delight"]),
+    (2024, "LCK", "Summer", "All-LCK 3rd team", ["Kingen", "Oner", "Bdd", "Aiming", "Keria"]),
+    (2025, "LCK", "*", "Regular season MVP", ["Chovy"]),
+    (2025, "LCK", "*", "All-LCK 1st team", ["Kiin", "Canyon", "Chovy", "Ruler", "Duro"]),
+    (2025, "LCK", "*", "All-LCK 2nd team", ["Doran", "Oner", "Bdd", "Viper", "Keria"]),
+    (2025, "LCK", "*", "All-LCK 3rd team", ["Zeus", "Peanut", "Faker", "Gumayusi", "Delight"]),
+    (2026, "LCK", "*", "Regular season MVP", ["Chovy"]),
+    (2026, "LCK", "*", "All-LCK 1st team", ["Zeus", "Kanavi", "Chovy", "Peyz", "Keria"]),
+    (2026, "LCK", "*", "All-LCK 2nd team", ["Kiin", "Lucid", "Zeka", "Ruler", "Delight"]),
+    (2026, "LCK", "*", "All-LCK 3rd team", ["Siwoo", "Canyon", "ShowMaker", "Gumayusi", "Career"]),
+    # LPL
+    (2024, "LPL", "Spring", "Regular season MVP", ["knight"]),
+    (2026, "LPL", "Split 1", "Regular season MVP", ["Tarzan"]),
+    (2026, "LPL", "Split 1", "1st All-Pro team", ["Flandre", "Tarzan", "knight", "Elk", "Kael"]),
+    (2026, "LPL", "Split 1", "2nd All-Pro team", ["Bin", "Xun", "Shanks", "Viper", "ON"]),
+    (2026, "LPL", "Split 1", "3rd All-Pro team", ["Xiaoxu", "Jiejie", "Creme", "Hope", "Vampire"]),
+    (2026, "LPL", "Split 2", "Regular season MVP", ["knight"]),
+    (2026, "LPL", "Split 2", "1st All-Pro team", ["Bin", "Xun", "knight", "Viper", "ON"]),
+    (2026, "LPL", "Split 2", "2nd All-Pro team", ["Flandre", "Tarzan", "HongQ", "JackeyLove", "Vampire"]),
+    (2026, "LPL", "Split 2", "3rd All-Pro team", ["Xiaoxu", "JunJia", "Creme", "Gala", "Kael"]),
+    (2026, "LPL", "Split 3", "Regular season MVP", ["knight"]),
+    # LEC
+    (2024, "LEC", "*", "Season MVP", ["Caps"]),
+    (2024, "LEC", "Winter", "Finals MVP", ["BrokenBlade"]),
+    (2024, "LEC", "Winter", "Team of the Split", ["BrokenBlade", "Yike", "Caps", "Hans Sama", "Mikyx"]),
+    (2024, "LEC", "Spring", "Team of the Split", ["BrokenBlade", "Razork", "Caps", "Ice", "Jun"]),
+    (2024, "LEC", "Spring", "Finals MVP", ["Caps"]),
+    (2024, "LEC", "Summer", "Finals MVP", ["Caps"]),
+    (2024, "LEC", "Finals", "Finals MVP", ["Hans Sama"]),
+    (2024, "LEC", "*", "Rookie of the Year", ["Jackies"]),
+    (2025, "LEC", "Winter", "Finals MVP", ["Vladi"]),
+    (2025, "LEC", "Spring", "Finals MVP", ["Elyoya"]),
+    (2025, "LEC", "Spring", "Season MVP", ["Upset"]),
+    (2025, "LEC", "Spring", "Season MVP 2nd place", ["Canna"]),
+    (2025, "LEC", "Spring", "Season MVP 3rd place", ["Vladi"]),
+    (2025, "LEC", "Spring", "1st All-Pro team", ["Canna", "Yike", "Vladi", "Upset", "Mikyx"]),
+    (2025, "LEC", "Spring", "2nd All-Pro team", ["Myrwn", "Razork", "Jojopyun", "Caliste", "Alvaro"]),
+    (2025, "LEC", "Spring", "3rd All-Pro team", ["Naak Nako", "Elyoya", "Caps", "Hans Sama", "Targamas"]),
+    (2025, "LEC", "Summer", "Finals MVP", ["SkewMond"]),
+    (2025, "LEC", "*", "Rookie of the Year", ["Caliste"]),
+    (2025, "LEC", "*", "Rookie of the Year 2nd place", ["SkewMond"]),
+    (2025, "LEC", "*", "Rookie of the Year 3rd place", ["Naak Nako"]),
+    (2026, "LEC", "Versus", "Finals MVP", ["Caps"]),
+    (2026, "LEC", "Spring", "Season MVP", ["Naak Nako"]),
+    (2026, "LEC", "Spring", "Season MVP 2nd place", ["Jojopyun"]),
+    (2026, "LEC", "Spring", "Season MVP 3rd place", ["Busio"]),
+    (2026, "LEC", "Spring", "Finals MVP", ["SkewMond"]),
+    (2026, "LEC", "Spring", "1st All-Pro team", ["Naak Nako", "SkewMond", "Jojopyun", "Caliste", "Busio"]),
+    (2026, "LEC", "Spring", "2nd All-Pro team", ["Canna", "Yike", "Caps", "Hans Sama", "Fleshy"]),
+    (2026, "LEC", "Spring", "3rd All-Pro team", ["BrokenBlade", "Lyncas", "Kyeahoo", "Carzzy", "Labrov"]),
+    (2026, "LEC", "Summer", "Season MVP", ["Caliste"]),
+    (2026, "LEC", "Summer", "Season MVP 2nd place", ["Yike"]),
+    (2026, "LEC", "Summer", "Season MVP 3rd place", ["Busio"]),
+    (2026, "LEC", "Summer", "Finals MVP", ["Labrov"]),
+    (2026, "LEC", "Summer", "1st All-Pro team", ["Canna", "Yike", "Kyeahoo", "Caliste", "Busio"]),
+    (2026, "LEC", "Summer", "2nd All-Pro team", ["Naak Nako", "SkewMond", "Caps", "Hans Sama", "Labrov"]),
+    (2026, "LEC", "Summer", "3rd All-Pro team", ["BrokenBlade", "Rhilech", "Jojopyun", "Carzzy", "Jun"]),
+    (2026, "LEC", "*", "Rookie of the Year", ["Rhilech"]),
+    (2026, "LEC", "*", "Rookie of the Year 2nd place", ["Jopa"]),
+    (2026, "LEC", "*", "Rookie of the Year 3rd place", ["Rooster"]),
+    # LCS
+    (2024, "LCS", "Summer", "1st All-Pro team", ["Impact", "Blaber", "APA", "Yeon", "CoreJJ"]),
+    (2024, "LCS", "Summer", "2nd All-Pro team", ["Thanatos", "Inspired", "Jojopyun", "Berserker", "Vulcan"]),
+    (2024, "LCS", "Summer", "3rd All-Pro team", ["Bwipo", "UmTi", "Quad", "Massu", "Busio"]),
+    (2026, "LCS", "Spring", "MVP", ["Vulcan"]),
+    (2026, "LCS", "Spring", "1st All-Pro team", ["Thanatos", "Josedeodo", "Saint", "Berserker", "Vulcan"]),
+    (2026, "LCS", "Summer", "1st All-Pro team", ["Morgan", "Josedeodo", "Saint", "Berserker", "CoreJJ"]),
+    (2026, "LCS", "Summer", "2nd All-Pro team", ["Dhokla", "HamBak", "Quid", "Yeon", "Isles"]),
+    (2026, "LCS", "Summer", "3rd All-Pro team", ["Thanatos", "Blaber", "Loki", "Rahel", "Vulcan"]),
+]
 # trophy cabinet (awards()): kind, tournament (index) or league, year, player, team, rating, games, detail
 AWARD_FIELDS = ["kind", "tour", "league", "year", "pi", "ti", "rating", "games", "detail"]
 # Tournament MVP: only players of top 4 teams; rating + this bonus by the team's final place (1st, 2nd, 3rd-4th) picks
@@ -720,7 +847,8 @@ def tournaments(tg, fins):
     rows = []
     for (y, lg, kind, sp), c in t.groupby(["y", "league", "kind", "sp"], sort=False):
         f = fins[(int(y), lg, kind, sp)]
-        name = LEAGUE_NAMES.get(lg, lg) + ("" if sp == "None" else " " + TOUR_NAMES.get((int(y), lg, sp), sp))
+        tn = "" if sp == "None" else TOUR_NAMES.get((int(y), lg, sp), sp)
+        name = LEAGUE_NAMES.get(lg, lg) + (" " + tn if tn else "")
         per = c["period"].dropna()
         if kind == "domestic" and len(per) and per.iloc[0] != sp:
             name += f" ({per.iloc[0]})"                       # major leagues: the common split name too
@@ -905,6 +1033,30 @@ def awards(g_out, tg, tours, raw, c_by_role):
             if len(b):
                 rows.append(["poy_role", None, lg, int(y), int(b.index[0]), int(b["ti"].iloc[0]),
                              round(float(b["rating"].iloc[0]), 3), int(b["games"].iloc[0]), role])
+    # official awards (OFFICIAL_AWARDS): the player is found by name among the raw player rows of the tournament (or of
+    # the league's domestic games that year); team = the one they played the most games for there
+    tidx = {(int(e["year"]), e["league"], None if pd.isna(e["split"]) else e["split"]): i for i, e in tours.iterrows()}
+    yr = tg["date"].dt.year
+    for y, lg, sp, label, names in OFFICIAL_AWARDS:
+        if sp == "*":
+            ti_ = None
+            gids = set(tg.loc[(yr == y) & (tg["league"] == lg) & (tg["kind"] == "domestic"), "gameid"])
+        else:
+            ti_ = tidx.get((y, lg, sp))
+            if ti_ is None:
+                print(f"  official award: no tournament {y} {lg} {sp}")
+                continue
+            e = tours.loc[ti_]
+            gids = set(tg_k.loc[tg_k["k"] == (y, lg, e["kind"], "None" if sp is None else sp), "gameid"])
+        r = raw[raw["gameid"].isin(gids)]
+        for nm in names:
+            x = r[r["playername"].astype(str).str.casefold() == nm.casefold()]
+            if x["pi"].nunique() != 1:
+                print(f"  official award: {nm} ({y} {lg} {sp} {label}): {x['pi'].nunique()} players found")
+                continue
+            ti = int(x.groupby("ti")["gameid"].nunique().idxmax())
+            rows.append(["official", None if ti_ is None else int(ti_), lg, y, int(x["pi"].iloc[0]), ti, None,
+                         int(x["gameid"].nunique()), label])
     return rows
 
 
@@ -1156,7 +1308,7 @@ def write_site_data(games, c_by_role, cfg, out_dir, leagues, complete, tg, team_
                    # share of complete games (only leagues below 99.5%) per year; no complete games = no player ratings
                    "complete": {y: {lg: v for lg, v in complete[y].items() if lg in shown and v < 0.995} for y in years},
                    # tournament names for data split names (TOUR_NAMES): league -> {split: name}
-                   "split_names": {lg: {sp: n for (_, l2, sp), n in TOUR_NAMES.items() if l2 == lg} for (_, lg, _) in TOUR_NAMES},
+                   "split_names": {lg: {sp: n for (_, l2, sp), n in TOUR_NAMES.items() if l2 == lg and n} for (_, lg, _), n0 in TOUR_NAMES.items() if n0},
                    "reference_year": REFERENCE_YEAR, "baseline_groups": YEARS[REFERENCE_YEAR]["BASELINE_GROUPS"],
                    "baseline_groups_by_year": {y: YEARS.get(y, YEARS[REFERENCE_YEAR])["BASELINE_GROUPS"] for y in years}, "international": INTERNATIONAL, "qualifiers": sorted(QUALIFIERS),
                    "K": K, "intl_weight": INTL_WEIGHT,
