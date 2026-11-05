@@ -27,7 +27,6 @@ Needs rating_core.py and the Oracle's Elixir match-data CSVs (<year>_LoL_esports
 in this folder.
 """
 import argparse, glob, json, os
-from datetime import datetime
 from itertools import combinations
 import numpy as np
 import pandas as pd
@@ -1298,7 +1297,8 @@ def write_site_data(games, c_by_role, cfg, out_dir, leagues, complete, tg, team_
     events = [lg for lg in EVENTS if lg in set(g_out.loc[g_out["kind"] == "event", "league"])]
     dump(os.path.join(out_dir, "index.json"), {
         "version": "0.2",
-        "generated": datetime.now().isoformat(timespec="seconds"),
+        # the latest game in the data (not the build time, so a rebuild of the same data changes nothing)
+        "data_until": tg["date"].max().strftime("%Y-%m-%d"),
         "note": "Performance rating relative to the games it is built from. Not a measure of skill or of league strength.",
         "config": {"leagues": leagues, "events": events,
                    # a league's tier in the latest year it played, and per year (tiers change: PCS was tier 1 in 2024)

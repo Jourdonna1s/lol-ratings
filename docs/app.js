@@ -4,6 +4,8 @@ const getJSON=async u=>{const r=await fetch(u);if(!r.ok)throw new Error(u+' '+r.
 let D,SF;
 try{D=await getJSON('data/index.json');SF=await Promise.all(D.years.map(y=>getJSON(`data/summary/${y}.json`)))}
 catch(e){app.innerHTML='<p>Could not load data/index.json. If you opened index.html by double-clicking, start a local server first (see README.md).</p>';return}
+if(D.data_until){const ft=document.querySelector('footer'),dt=new Date(D.data_until+'T12:00:00Z');
+  if(ft)ft.prepend(`Games up to ${dt.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric',timeZone:'UTC'})}. `)}
 const F={},TF={};
 D.game_fields.forEach((f,i)=>F[f]=i);(D.team_fields||[]).forEach((f,i)=>TF[f]=i);
 const C=D.config,MIN=C.min_games||15,LEAGUES=C.leagues||C.tier1,EVENTS=C.events||[],EV=new Set(EVENTS),TIER=C.tiers||{},
