@@ -43,13 +43,18 @@ MIN_BASELINE_GAMES = 30   # complete games a league needs for its own baseline (
 TIERS = {"major": ["LCK", "LPL", "LEC", "LCS"],
          "tier1": ["LCP", "CBLOL"],
          "tier3": ["LAS", "NL", "HC", "LFL2", "CBLOLA"]}
-INTERNATIONAL = ["MSI", "WLDs", "FST", "EWC"]          # league codes of international events
+INTERNATIONAL = ["MSI", "WLDs", "FST", "EWC",          # league codes of international events
+                 "IEM", "MSC"]                         # 2015-17 Intel Extreme Masters, 2020 Mid-Season Cup
+# page addresses come from the order of the player and team lists: the years on the site before phase 7 (from this one)
+# keep their place, older years come after them, newest first
+KEEP_ORDER_FROM = 2024
 MIN_TEAM_GAMES = 30   # games (complete or partial) a league needs to be on the team side (Elo, team pages, tournaments)
 # cross-league events (teams from several leagues): each team is rated against its home league's baseline,
 # counted with weight 1, and not as international games. They get their own leaderboard on the site.
 EVENTS = ["EM", "KeSPA Cup", "AM", "AC", "CCWS", "HW", "WSCI", "DCGI", "DCup", "WLRQ",
           "AmCh", "CDF", "CT", "EPL", "GLLPA", "EBLPA", "IC", "NLC Aurora Open", "TSC", "USP", "PRMP",   # 2024
-          "ASI", "LTA"]   # 2025 (LTA: the games between the LTA North and South conferences)
+          "ASI", "LTA",   # 2025 (LTA: the games between the LTA North and South conferences)
+          "IWCI", "EUM", "ASCI", "NEST", "Riot", "LGL", "AOL", "GSG", "NERD", "UGP", "EL"]   # 2015-2023
 # regional qualifiers filed under an international league code: rated like EVENTS, shown as "<event> Qualifier"
 # EWC 2026: qualifiers Apr-Jun are playoffs=0, the main event in July is playoffs=1
 # Worlds: a region's own qualifier filed under WLDs (2026: the LPL qualifier of Sep 17-19) = the games before the
@@ -86,6 +91,13 @@ LEAGUE_NAMES = {
     "DCup": "Demacia Cup", "EBLPA": "EBL Pro-Am", "EPL": "European Pro League", "GLLPA": "GLL Pro-Am",
     "HW": "Hitpoint Winter", "IC": "Iberian Cup", "PRMP": "Prime League Pokal", "TSC": "TCL Season Cup",
     "USP": "Ultraliga Super Puchar", "WSCI": "World Star Challengers Invitational", "WLRQ": "WSCI China Qualifier",
+    # 2014-2023
+    "LMS": "League of Legends Master Series", "NA CS": "NA Challenger Series", "EU CS": "EU Challenger Series",
+    "IEM": "Intel Extreme Masters", "MSC": "Mid-Season Cup", "IWCI": "International Wildcard Invitational",
+    "EUM": "European Masters", "OPL": "Oceanic Pro League", "LCL": "LoL Continental League",
+    "LLN": "Liga Latinoamérica Norte", "CLS": "Copa Latinoamérica Sur", "GPL": "Garena Premier League",
+    "LSPL": "LoL Secondary Pro League", "CK": "Challengers Korea", "LJLCS": "LJL Challenger Series",
+    "OCS": "Oceanic Challenger Series", "ASCI": "Asia Star Challengers Invitational",
 }
 K = 12                 # small-sample shrinkage (use the K_USE printed by the baseline-check notebook)
 INTL_WEIGHT = 2.0      # one international game counts as this many domestic games in the overall rating
@@ -130,6 +142,40 @@ YEARS = {
            "UNLABELLED": {}, "TOUR_TIERS": {},
            "MERGE_SPLITS": {"LPL": {"Summer Placements": "Summer"}}, "DATE_SPLITS": {}},
 }
+# 2014-2023 (phase 7): the leagues of the time. Major: the big four (EU LCS and NA LCS until 2018, LEC and LCS from
+# 2019; no LPL in the 2014-15 files, no LCK in 2014); tier 1: the other regions with their own Worlds spots. A major
+# league's unlabelled games (late Aug/Sep) are its regional Worlds qualifier: "Regional Finals". RENAME_LEAGUES: league
+# codes changed when the file is read (2015: OGN = the LCK; 2015-18: the EU LCS and NA LCS regional finals are filed
+# as "LEC" and "LCS").
+RENAME_LEAGUES = {}
+_EU_NA = {"LCS": "NA LCS", "LEC": "EU LCS"}
+def _old_year(major, tier1, rename=None, splits=("Spring", "Summer"), date_splits=None, split_map=None, tour_tiers=None):
+    return {"TIERS": {"major": major, "tier1": tier1, "tier3": _TIER3}, "BASELINE_GROUPS": {"main": major},
+            "SPLIT_MAP": {**{(lg, sp): sp for lg in major for sp in splits}, **(split_map or {})},
+            "UNLABELLED": {lg: "Regional Finals" for lg in major}, "TOUR_TIERS": tour_tiers or {},
+            "MERGE_SPLITS": {}, "DATE_SPLITS": date_splits or {}, "RENAME_LEAGUES": rename or {}}
+_OLD4, _NEW4 = ["LCK", "LPL", "EU LCS", "NA LCS"], ["LCK", "LPL", "LEC", "LCS"]
+_WILD = ["LMS", "CBLOL", "TCL", "OPL", "LJL", "LCL", "LLN", "CLS", "GPL"]     # 2016-18 (wildcard regions + LMS)
+YEARS.update({
+    2014: _old_year(["EU LCS", "NA LCS"], []),
+    # 2015: OGN = the LCK; its Sep 2-5 games = the regional finals; the LCK games of Sep 11-12 = the promotion
+    # tournament for 2016; KeSPA = the KeSPA Cup
+    2015: _old_year(["LCK", "EU LCS", "NA LCS"], ["LMS", "CBLOL", "TCL", "OPL"],
+                    rename={"OGN": "LCK", "KeSPA": "KeSPA Cup", **_EU_NA},
+                    date_splits={"LCK": [("09-02", "09-05", "Regional Finals"), ("09-10", "09-30", "Promotion")]},
+                    tour_tiers={("LCK", "Promotion"): "tier2"}),
+    2016: _old_year(_OLD4, _WILD, rename=_EU_NA),
+    2017: _old_year(_OLD4, _WILD, rename=_EU_NA),
+    2018: _old_year(_OLD4, _WILD + ["VCS"], rename=_EU_NA),
+    2019: _old_year(_NEW4, ["LMS", "CBLOL", "TCL", "OPL", "LJL", "LCL", "LLA", "VCS"]),
+    2020: _old_year(_NEW4, ["PCS", "VCS", "CBLOL", "TCL", "LJL", "LCL", "LLA", "OPL"]),
+    2021: _old_year(_NEW4, ["PCS", "VCS", "CBLOL", "TCL", "LJL", "LCL", "LLA", "LCO"]),
+    # 2022: the LCS Spring playoffs (Apr 2-24) have no split name in the data
+    2022: _old_year(_NEW4, ["PCS", "VCS", "CBLOL", "TCL", "LJL", "LLA", "LCO"],
+                    date_splits={"LCS": [("04-01", "04-30", "Spring")]}),
+    2023: _old_year(_NEW4, ["PCS", "VCS", "CBLOL", "LJL", "LLA", "LCO"], splits=("Winter", "Spring", "Summer"),
+                    split_map={("LEC", "Finals"): None}),
+})
 YEARS[REFERENCE_YEAR] = {k: globals()[k] for k in ["TIERS", "BASELINE_GROUPS", "SPLIT_MAP", "UNLABELLED", "TOUR_TIERS",
                                                     "MERGE_SPLITS", "DATE_SPLITS"]}
 
@@ -137,7 +183,7 @@ YEARS[REFERENCE_YEAR] = {k: globals()[k] for k in ["TIERS", "BASELINE_GROUPS", "
 def use_year(y):
     """Switches the year-dependent settings (TIERS, BASELINE_GROUPS, SPLIT_MAP, UNLABELLED, TOUR_TIERS, MERGE_SPLITS,
     DATE_SPLITS) to year y."""
-    globals().update(YEARS.get(y, YEARS[REFERENCE_YEAR]))
+    globals().update({"RENAME_LEAGUES": {}}, **YEARS.get(y, YEARS[REFERENCE_YEAR]))
 
 
 # tournament formats (hand-written from Riot's announcements and press coverage; the data has no format or stage
@@ -322,7 +368,7 @@ FORMATS = {
 # tournament names where the data's split name is not what the league calls it: (year, league, split) -> name shown
 # (LCK since 2025: the data files the season as "Rounds 1-2" and "Rounds 3-5"/"3-4"; each ends with the playoffs
 # that decide its title)
-TOUR_NAMES = {(2024, "LEC", "Finals"): "Season Finals",
+TOUR_NAMES = {(2023, "LEC", "Finals"): "Season Finals", (2024, "LEC", "Finals"): "Season Finals",
               (2025, "LCK", "Rounds 1-2"): "Road to MSI", (2025, "LCK", "Rounds 3-5"): "Season Playoffs",
               (2026, "LCK", "Rounds 1-2"): "Road to MSI", (2026, "LCK", "Rounds 3-4"): "Season Playoffs",
               # "" = the league name alone: one tournament a year, filed under a season name or the year
@@ -600,6 +646,27 @@ def tidy(p, kind):
     return out
 
 
+def clean_year(df):
+    """Fixes for the older files (in place). Stats that did not exist yet are 0 in the data (vision score and tower
+    damage before 2017): missing, not 0, per league. Team rows without picks (2014-16): the players' champions (by
+    role, not the draft order). Games with a team without a name (one VCS game in 2021) are left out."""
+    df.drop(df.index[df["gameid"].isin(df.loc[df["teamname"].isna(), "gameid"])], inplace=True)
+    df.reset_index(drop=True, inplace=True)
+    for c in [c for c in rc.NUM_COLS if c in df.columns]:
+        x = pd.to_numeric(df[c], errors="coerce")
+        dead = (x.fillna(0) != 0).groupby(df["league"]).mean()
+        dead = dead[dead < 0.01].index
+        if len(dead):
+            df.loc[df["league"].isin(dead), c] = np.nan
+    team = df["position"] == "team"
+    if "pick1" in df.columns and df.loc[team, "pick1"].isna().all():
+        ch = (df[~team].sort_values("participantid").groupby(["gameid", "side"])["champion"].agg(list))
+        keys = list(zip(df.loc[team, "gameid"], df.loc[team, "side"]))
+        for i in range(5):
+            df[f"pick{i + 1}"] = df[f"pick{i + 1}"].astype(object)
+            df.loc[team, f"pick{i + 1}"] = [(ch.get(k) or [])[i] if len(ch.get(k) or []) > i else None for k in keys]
+
+
 def label_splits(games):
     """period = the split name the site filters on. Major leagues: the common name from SPLIT_MAP.
     Other leagues keep their own split names; their unlabelled games take the nearest labelled game's split
@@ -701,7 +768,7 @@ def team_rows(df, games, leagues, events, y):
     # what a game counts for: international events by name, EM, other events, EWC qualifiers, leagues by tier
     t["comp"] = np.where(t["kind"] == "international", t["league"],
                          np.where(t["kind"] == "event", np.where(t["league"].isin(QUALIFIERS), "qualifier",
-                                                                 np.where(t["league"].isin(["EM", "WSCI"]), t["league"],
+                                                                 np.where(t["league"].isin(["EM", "EUM", "WSCI"]), t["league"].replace({"EUM": "EM"}),
                                                                           np.where(t["league"].isin(major_events), "event_major", "event"))),
                                   t["league"].map(tier_of)))
     t["tier"] = t["home"].map(tier_of)               # tier of the home league this year (Elo league-level prior)
@@ -728,7 +795,9 @@ def team_games(parts, roster):
     t = pd.concat(parts, ignore_index=True)
     t = t.sort_values(["date", "gameid", "side"], kind="stable").reset_index(drop=True)
     # REFERENCE_YEAR's teams first, in their order, so their page addresses stay the same
-    keys = list(dict.fromkeys(list(t.loc[t["date"].dt.year == REFERENCE_YEAR, "key"]) + list(t["key"])))
+    ty = t["date"].dt.year
+    keys = list(dict.fromkeys(list(t.loc[ty == REFERENCE_YEAR, "key"]) + list(t.loc[ty >= KEEP_ORDER_FROM, "key"])
+                              + [k for y in sorted(set(ty[ty < KEEP_ORDER_FROM]), reverse=True) for k in t.loc[ty == y, "key"]]))
     t["ti"] = t["key"].map({k: i for i, k in enumerate(keys)})
     other = t[["gameid", "ti", "teamname"]].rename(columns={"ti": "oi", "teamname": "opponent"})
     t = t.merge(other, on="gameid")
@@ -1225,7 +1294,11 @@ def write_site_data(games, c_by_role, cfg, out_dir, leagues, complete, tg, team_
                                       + INTERNATIONAL).to_numpy())
     first_old = dict.fromkeys(k for k, o in zip(pkey, old) if o)
     first_ref = dict.fromkeys(k for k, o in zip(pkey, ref) if o and k not in first_old)
-    players = list(first_old) + list(first_ref) + [k for k in dict.fromkeys(pkey) if k not in first_old and k not in first_ref]
+    gy_ = g_out["year"].to_numpy()
+    order = list(np.flatnonzero(gy_ >= KEEP_ORDER_FROM)) + [i for y in sorted(set(gy_[gy_ < KEEP_ORDER_FROM]), reverse=True)
+                                                            for i in np.flatnonzero(gy_ == y)]
+    players = list(first_old) + list(first_ref) + [k for k in dict.fromkeys(pkey[i] for i in order)
+                                                    if k not in first_old and k not in first_ref]
     pidx = {k: i for i, k in enumerate(players)}
     g_out["pi"] = [pidx[k] for k in pkey]
     game_fields = GAME_FIELDS + ["pi"]
@@ -1344,6 +1417,8 @@ def main(pattern=FILES, out_dir=OUT_DIR, show_report=False):
         use_year(y)
         print(f"===== {y}: {csv}")
         df = pd.read_csv(csv, low_memory=False)
+        df["league"] = df["league"].replace(RENAME_LEAGUES)
+        clean_year(df)
         for lg, m in MERGE_SPLITS.items():
             sel = df["league"] == lg
             df.loc[sel, "split"] = df.loc[sel, "split"].replace(m)

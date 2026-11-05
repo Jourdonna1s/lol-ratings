@@ -3,7 +3,7 @@ const app=document.getElementById('app');
 const getJSON=async u=>{const r=await fetch(u);if(!r.ok)throw new Error(u+' '+r.status);return r.json()};
 let D,SF;
 let CI=new Set();
-try{const ci=getJSON('img/champions.json').catch(()=>[]);D=await getJSON('data/index.json');SF=await Promise.all(D.years.map(y=>getJSON(`data/summary/${y}.json`)));CI=new Set(await ci)}
+try{const ci=getJSON('img/champions.json').catch(()=>[]);D=await getJSON('data/index.json');SF=[await getJSON(`data/summary/${D.years[D.years.length-1]}.json`)];CI=new Set(await ci)}
 catch(e){app.innerHTML='<p>Could not load data/index.json. If you opened index.html by double-clicking, start a local server first (see README.md).</p>';return}
 if(D.data_until){const ft=document.querySelector('footer'),dt=new Date(D.data_until+'T12:00:00Z');
   if(ft)ft.prepend(`Games up to ${dt.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric',timeZone:'UTC'})}. `)}
@@ -42,8 +42,9 @@ const unfiltered=f=>{const s={split:st.split,stage:st.stage,[YK]:st[YK]};st.spli
 
 // summary rows: one per player x team x league x split x stage, holding the sums rateSums() needs.
 // They are shaped like game rows (same F positions for league, kind, period, split, stage, team, date=year) so keep() works on both.
-const SUM=[],TS=[];
-SF.forEach((f,yi)=>{const S={};f.fields.forEach((k,i)=>S[k]=i);
+// The summary files are loaded per year when a page needs that year (ensureYears); the latest year at the start.
+const SUM=[],TS=[],SLOADED=new Set();
+function addSummary(f,yi){SLOADED.add(YEARS[yi]);const S={};f.fields.forEach((k,i)=>S[k]=i);
   for(const r of f.rows){const c=[];for(const k of ['league','kind','period','split','stage','team'])c[F[k]]=r[S[k]];c[F.date]=YEARS[yi];
     c.pi=r[S.player];c.ti=S.ti!=null?r[S.ti]:null;c.games=r[S.games];c.sums={n:r[S.n],sw:r[S.sw],swd:r[S.swd],sw2:r[S.sw2],s1:r[S.s1],s2:r[S.s2]};
     c.first=ORD(yi,r[S.first]);c.last=ORD(yi,r[S.last]);SUM.push(c)}
@@ -51,7 +52,8 @@ SF.forEach((f,yi)=>{const S={};f.fields.forEach((k,i)=>S[k]=i);
   if(f.teams){const T={};f.teams.fields.forEach((k,i)=>T[k]=i);
     for(const r of f.teams.rows){const c=[];for(const k of ['league','kind','period','split','stage'])c[F[k]]=r[T[k]];c[F.date]=YEARS[yi];
       Object.assign(c,{ti:r[T.team],games:r[T.games],wins:r[T.wins],sw:r[T.s_won],sl:r[T.s_lost],gdn:r[T.gd_n],gds:r[T.gd_sum],
-        first:ORD(yi,r[T.first]),last:ORD(yi,r[T.last]),elo:r[T.elo]});TS.push(c)}}});
+        first:ORD(yi,r[T.first]),last:ORD(yi,r[T.last]),elo:r[T.elo]});TS.push(c)}}}
+addSummary(SF[0],YEARS.length-1);
 SUM.sort((a,b)=>a.first-b.first);TS.sort((a,b)=>a.first-b.first);
 
 // Major leagues: domestic games of the major leagues plus international games. All leagues: every game.
@@ -65,11 +67,14 @@ const keep=(g,L)=>inL(g,L)&&(st.split=='all'||(L==INTL?g[F.league]:g[F.period])=
 // split options: of the chosen year (all years: every split name)
 const sp={};
 const splits=L=>{const k=L+'|'+yv();return sp[k]||(sp[k]=[...new Set(SUM.filter(g=>inL(g,L)&&(!COMB(L)||MJ(g))&&(yv()=='all'||yr(g)==yv())).map(g=>L==INTL?g[F.league]:g[F.period]).filter(x=>x!=null))])};
-const HAS_INTL=SUM.some(g=>g[F.kind]=='international');
+let HAS_INTL=false;
 // regional split names behind each common split name ("Winter" = LEC Versus, LCK Cup, ...)
 // SPN: the league's name for a data split name (LCK "Rounds 1-2" = Road to MSI)
 const SPN=(l,s)=>((C.split_names||{})[l]||{})[s]||s,RN={};
-for(const g of SUM)if(g[F.kind]=='domestic'&&g[F.period]&&g[F.split]){const a=((RN[g[F.league]]=RN[g[F.league]]||{})[g[F.period]]=RN[g[F.league]][g[F.period]]||[]),n=SPN(g[F.league],g[F.split]);if(!a.includes(n))a.push(n)}
+function deriveSplits(){HAS_INTL=SUM.some(g=>g[F.kind]=='international');for(const k in RN)delete RN[k];
+for(const g of SUM)if(g[F.kind]=='domestic'&&g[F.period]&&g[F.split]){const a=((RN[g[F.league]]=RN[g[F.league]]||{})[g[F.period]]=RN[g[F.league]][g[F.period]]||[]),n=SPN(g[F.league],g[F.split]);if(!a.includes(n))a.push(n)}}
+deriveSplits();
+
 const rname=(L,s)=>{const a=(RN[L]||{})[s];return a&&a.join('/')!=s?a.join('/'):''};
 const regions=s=>MAJ.filter(l=>(RN[l]||{})[s]).map(l=>l+' '+RN[l][s].join('/')).join(', ');
 const legend=()=>{const ss=[...new Set(MAJ.flatMap(splits))];
@@ -216,16 +221,28 @@ function teamBoard(L){
 // latest split of each league: its latest split (by last game) with at least 3/4 of the league's median number of teams;
 // final stages (VCS Finals, EBL Finals, LES Final Four) don't count as a split. Ranked now: teams that played in it
 // (on a combined board: in their own league's latest split)
-const LATEST={},TLAST={},TLASTO={},SPT={},SPO={};
+const LATEST={},TLAST={},TLASTO={},SPT={},SPO={},ACTIVE=new Set(),PLAST={};
+function deriveLatest(){for(const o of [LATEST,TLAST,TLASTO,SPT,SPO,PLAST])for(const k in o)delete o[k];ACTIVE.clear();
 for(const c of TS){const L=c[F.league],P=c[F.period];if(P==null)continue;
   ((SPT[L]=SPT[L]||{})[P]=SPT[L][P]||new Set()).add(c.ti);SPO[L+'|'+P]=Math.max(SPO[L+'|'+P]||-1,c.last);
   const t=teams[c.ti];if(t&&L==t.league&&(!(c.ti in TLASTO)||c.last>TLASTO[c.ti])){TLAST[c.ti]=P;TLASTO[c.ti]=c.last}}
 for(const L in SPT){let ps=Object.entries(SPT[L]);const nf=ps.filter(([p])=>!/final/i.test(p));if(nf.length)ps=nf;
   const n=ps.map(([,s])=>s.size).sort((a,b)=>a-b),med=n[Math.floor((n.length-1)/2)];
   const ok=ps.filter(([,s])=>s.size>=0.75*med).sort((a,b)=>SPO[L+'|'+b[0]]-SPO[L+'|'+a[0]]);LATEST[L]={p:ok[0][0],teams:ok[0][1]}}
-const ACTIVE=new Set(teams.filter(t=>LATEST[t.league]&&LATEST[t.league].teams.has(t.i)).map(t=>t.i));
+teams.forEach(t=>{if(LATEST[t.league]&&LATEST[t.league].teams.has(t.i))ACTIVE.add(t.i)});
 // each player's latest team (from the summary rows), to tell subs from former players
-const PLAST={};for(const c of SUM){const x=PLAST[c.pi];if(!x||c.last>x.o)PLAST[c.pi]={ti:c.ti,o:c.last}}
+for(const c of SUM){const x=PLAST[c.pi];if(!x||c.last>x.o)PLAST[c.pi]={ti:c.ti,o:c.last}}}
+deriveLatest();
+// loads the summary files of years ys that are not loaded yet, then recomputes what depends on them
+async function ensureYears(ys){
+  const need=[...new Set(ys.map(String))].filter(y=>YEARS.includes(y)&&!SLOADED.has(y));if(!need.length)return;
+  const fs=await Promise.all(need.map(y=>getJSON(`data/summary/${y}.json`)));
+  need.forEach((y,i)=>{if(!SLOADED.has(y))addSummary(fs[i],YEARS.indexOf(y))});
+  SUM.sort((a,b)=>a.first-b.first);TS.sort((a,b)=>a.first-b.first);
+  for(const o of [lb,tb,sp])for(const k in o)delete o[k];
+  deriveSplits();deriveLatest();
+}
+const yearsFor=y=>y=='all'?YEARS:[y];
 const TSORT={elo:a=>a.elo,win:a=>a.wins/a.games,gd:a=>a.gdn?a.gds/a.gdn:-1e9};
 const sortTeams=(rows,k=st.tsort)=>rows.slice().sort((a,b)=>TSORT[k](b)-TSORT[k](a)||b.elo-a.elo);
 // short label of the current selection, e.g. "LEC · Winter (Versus) · Playoffs · 2026"
@@ -284,7 +301,9 @@ function filters(el,lgs,L,setL,redraw,roles){
   ${sl.length&&st.split!='all'&&(note||tourFor(L))?`<div class="mut sm fnote">${note?`${esc(st.split)} = ${esc(note)}`:''}${note&&tourFor(L)?' · ':''}${tourFor(L)?`<a href="#${tourFor(L).slug}">${esc(tourFor(L).short)} ${tourFor(L).year}: standings and results →</a>`:''}</div>`:''}`;
   const ch=(id,f)=>{const s=el.querySelector('#'+id);if(s)s.onchange=()=>{f(s.value);st.all=st.tall=0;redraw()}};
   ch('f-lg',k=>{setL(k);st.split='all'});
-  ch('f-sp',k=>st.split=k);ch('f-st',k=>st.stage=k);ch('f-yr',k=>{st[YK]=k;if(!splits(L).includes(st.split))st.split='all'});ch('f-rl',k=>st.role=k);
+  ch('f-sp',k=>st.split=k);ch('f-st',k=>st.stage=k);const yh=el.querySelector('#f-yr');if(yh)yh.onchange=async()=>{const k=yh.value;
+    if(YK=='year'){yh.disabled=true;try{await ensureYears(yearsFor(k))}catch(e){yh.disabled=false;return}}
+    st[YK]=k;if(!splits(L).includes(st.split))st.split='all';st.all=st.tall=0;redraw()};ch('f-rl',k=>st.role=k);
   const r=el.querySelector('#f-reset');if(r)r.onclick=()=>{st.split=st.stage='all';st[YK]=YDEF();if(roles)st.role='all';st.all=st.tall=0;redraw()};
 }
 // the tournament behind a single-league board with one split chosen (the latest one in the chosen year)
@@ -778,6 +797,10 @@ async function route(){
     // a chosen split only makes sense with its league, so carry the league over in that case
     pyear(p.games);st.plg=st.split!='all'&&p.games.some(g=>inL(g,st.lg))?st.lg:'all';playerPage(p);
   }else if(t){
+    // a team page: the team's years and every later one (its players' later teams)
+    const y0=Math.min(...t.files.map(k=>+k.slice(0,4)));
+    try{await ensureYears(YEARS.filter(y=>+y>=y0))}catch(err){app.innerHTML='<p>Could not load this page. <a href="#home">Back to the main page</a></p>';return}
+    if(my!=nav)return;
     if(!await load(t,teamGames))return;
     pyear(t.rows);st.tlg=st.split!='all'&&t.rows.some(g=>inL(g,st.lg))?st.lg:'all';teamPage(t);
   }else if(e){
@@ -797,8 +820,11 @@ async function route(){
     if(!s){app.innerHTML=header('events')+nf;wireSearch();return}
     st.mg=/^g\d+$/.test(gp||'')?+gp.slice(1):'all';matchPage(s,pf);
   }else if(h=='events')eventsPage();
-  else if(h=='players')playersPage();
-  else if(h=='teams')teamsPage();
+  else if(h=='players'||h=='teams'){
+    if(!yearsFor(st.year).every(y=>SLOADED.has(y))){app.innerHTML='<p class="mut">Loading…</p>';
+      try{await ensureYears(yearsFor(st.year))}catch(err){app.innerHTML='<p>Could not load the leaderboards. <a href="#home">Back to the main page</a></p>';return}
+      if(my!=nav)return}
+    h=='players'?playersPage():teamsPage()}
   else home();
   window.scrollTo(0,0);
 }
