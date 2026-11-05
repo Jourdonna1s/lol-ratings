@@ -98,6 +98,14 @@ LEAGUE_NAMES = {
     "LLN": "Liga Latinoamérica Norte", "CLS": "Copa Latinoamérica Sur", "GPL": "Garena Premier League",
     "LSPL": "LoL Secondary Pro League", "CK": "Challengers Korea", "LJLCS": "LJL Challenger Series",
     "OCS": "Oceanic Challenger Series", "ASCI": "Asia Star Challengers Invitational",
+    "LCSA": "LCS Academy", "NASG": "NA Scouting Grounds", "PGC": "Proving Grounds Circuit", "UPL": "Upsurge Premier League",
+    "RCL": "Risen Champions League", "EGL": "EGL Summer Showdown", "BRCC": "Brazilian Challenger Circuit",
+    "OTBLX": "Open Tour Benelux", "BL": "Belgian League", "DL": "Dutch League", "BM": "Baltic Masters",
+    "UKLC": "UK League Championship", "PGN": "PG Nationals", "SLO": "Superliga Orange", "CISC": "CIS Challenger League",
+    "TPL": "Turkish Promotion League", "TCS": "Turkish Challenger Series", "TAL": "Turkish Academy League",
+    "NEST": "National Electronic Sports Tournament", "Riot": "Mid-Season Showdown", "LJLA": "LJL Academy",
+    "LHE": "Liga de Honor Entel", "LMF": "Liga Master Flow", "DDH": "División de Honor", "GL": "Golden League",
+    "VL": "Volcano League", "SL (LATAM)": "Stars League", "EL": "Elements League",
 }
 K = 12                 # small-sample shrinkage (use the K_USE printed by the baseline-check notebook)
 INTL_WEIGHT = 2.0      # one international game counts as this many domestic games in the overall rating
@@ -404,7 +412,7 @@ GAME_FIELDS = ["player", "role", "team", "date", "league", "kind", "stage", "per
                "cs", "dpm", "vspm", "series", "gn"]       # series + gn (game number in it): the match pages
 SUMMARY_FIELDS = ["player", "league", "kind", "period", "split", "stage",
                   "games", "n", "sw", "swd", "sw2", "s1", "s2", "first", "last", "team", "ti"]
-PLAYER_FIELDS = ["name", "role", "team", "league", "games", "files"]
+PLAYER_FIELDS = ["name", "role", "team", "league", "games", "files"]   # files: positions in index.json "file_keys"
 # team-games (one row per team per game, partial games included: records and Elo use every game)
 TEAM_FIELDS = ["team", "ti", "date", "league", "kind", "stage", "period", "split", "opponent", "oi", "side", "result", "game",
                "series", "s_result", "minutes", "kills", "deaths", "fb", "fd", "fh", "ft", "dragons", "grubs", "barons", "towers",
@@ -421,6 +429,24 @@ ROLES = ["top", "jng", "mid", "bot", "sup"]
 # event or event), or "*" for an award of the league's whole year (e.g. the LCK's regular-season MVP from 2025).
 # Players by name as in the data; each is found among the players of that tournament (or league and year).
 OFFICIAL_AWARDS = [
+    # international events 2014-2023 (Worlds 2014-16 and MSI 2016: MVP of the event; Riot named no MSI 2015 MVP)
+    (2014, "WLDs", None, "MVP", ["Mata"]),
+    (2015, "WLDs", None, "MVP", ["MaRin"]),
+    (2016, "WLDs", None, "MVP", ["Faker"]),
+    (2017, "WLDs", None, "Finals MVP", ["Ruler"]),
+    (2018, "WLDs", None, "Finals MVP", ["Ning"]),
+    (2019, "WLDs", None, "Finals MVP", ["Tian"]),
+    (2020, "WLDs", None, "Finals MVP", ["Canyon"]),
+    (2021, "WLDs", None, "Finals MVP", ["Scout"]),
+    (2022, "WLDs", None, "Finals MVP", ["Kingen"]),
+    (2023, "WLDs", None, "Finals MVP", ["Zeus"]),
+    (2016, "MSI", None, "MVP", ["Faker"]),
+    (2017, "MSI", None, "Finals MVP", ["Wolf"]),
+    (2018, "MSI", None, "Finals MVP", ["Uzi"]),
+    (2019, "MSI", None, "Finals MVP", ["Caps"]),
+    (2021, "MSI", None, "Finals MVP", ["GALA"]),
+    (2022, "MSI", None, "Finals MVP", ["Wei"]),
+    (2023, "MSI", None, "Finals MVP", ["knight"]),
     # international events
     (2024, "MSI", None, "Finals MVP", ["Lehends"]),
     (2024, "EWC", None, "MVP", ["Faker"]),
@@ -1557,6 +1583,12 @@ def write_site_data(games, c_by_role, cfg, out_dir, leagues, complete, tg, team_
     trow = [[r["name"], r["home"] if r["home"] in leagues else r["most"], int(r["games"]), tfiles[i]]
             for i, r in tl.reindex(range(len(team_keys))).iterrows()]
 
+    # the files lists as numbers: positions in file_keys (every "year/league" of the player and team files, by year)
+    fkeys = sorted({k for fl in pfiles + tfiles for k in fl}, key=lambda k: (k[:4], k[5:]))
+    fpos = {k: i for i, k in enumerate(fkeys)}
+    for r in prow + trow:
+        r[-1] = [fpos[k] for k in r[-1]]
+
     for f in ["site_data.json"]:                              # the single-file layout from before
         if os.path.exists(os.path.join(out_dir, f)):
             os.remove(os.path.join(out_dir, f))
@@ -1584,7 +1616,7 @@ def write_site_data(games, c_by_role, cfg, out_dir, leagues, complete, tg, team_
                    "formula": "rating = 1 + c(role) * sum(w * (game_rating - 1)) / (sum(w) + K)",
                    "early_weights": cfg["EARLY_WEIGHTS"], "late_groups": cfg["LATE_GROUPS"],
                    "late_weights": cfg["LATE_WEIGHTS"], "early_share": cfg["EARLY_SHARE"]},
-        "years": years, "files": files, "game_fields": game_fields, "summary_fields": SUMMARY_FIELDS,
+        "years": years, "files": files, "file_keys": fkeys, "game_fields": game_fields, "summary_fields": SUMMARY_FIELDS,
         "players": {"fields": PLAYER_FIELDS, "rows": prow},
         "team_fields": TEAM_FIELDS, "team_summary_fields": TEAM_SUMMARY_FIELDS,
         "teams": {"fields": TEAM_INDEX_FIELDS, "rows": trow},
