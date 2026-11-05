@@ -38,6 +38,11 @@ date of the latest game ("Games up to ..."), index.json "data_until".
 Champion icons: `python fetch_images.py` (from pipeline/) downloads new champions from Riot's Data Dragon into
 docs/img/champions/ (--force: all again). The daily Action runs it too.
 
+## Years
+2014-2026, one Oracle's Elixir file per year in pipeline/. Each year is rated on its own baselines, so adding one never
+changes another year's player numbers (team Elo runs through all years, so it does). 2014-16 have no vision score
+or tower damage (rated without them); the LPL has no complete games in 2016-17 and 2022-23 (teams only).
+
 ## Data files (docs/data/, generated)
     index.json               config, years, list of game files, player and team index (search, which files each is in), Elo settings,
                              tournaments (one per league split, event and international event) and qualification links

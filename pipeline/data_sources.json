@@ -1,5 +1,5 @@
 {
   "_about": "Oracle's Elixir's public Google Drive folder (linked from oracleselixir.com/tools/downloads) and the years the site uses. fetch_data.py lists the folder and downloads <year>_LoL_esports_match_data_from_OraclesElixir.csv for each year. A new year: add it here and its settings to YEARS in build_site_data.py.",
   "folder": "1gLSw0RLjBbtaNy0dgnGQDAZOHIgCe-HH",
-  "years": [2024, 2025, 2026]
+  "years": [2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026]
 }
