@@ -332,14 +332,15 @@ SPLIT_GAP_DAYS = 21    # unlabelled games: take the nearest labelled game's spli
 OUT_DIR = "../docs/data"
 
 GAME_FIELDS = ["player", "role", "team", "date", "league", "kind", "stage", "period", "split", "opponent", "champion",
-               "result", "minutes", "kills", "deaths", "assists", "gd15", "r_early", "r_late", "r_overall"]
+               "result", "minutes", "kills", "deaths", "assists", "gd15", "r_early", "r_late", "r_overall",
+               "cs", "dpm", "vspm", "series", "gn"]       # series + gn (game number in it): the match pages
 SUMMARY_FIELDS = ["player", "league", "kind", "period", "split", "stage",
                   "games", "n", "sw", "swd", "sw2", "s1", "s2", "first", "last", "team", "ti"]
 PLAYER_FIELDS = ["name", "role", "team", "league", "games", "files"]
 # team-games (one row per team per game, partial games included: records and Elo use every game)
 TEAM_FIELDS = ["team", "ti", "date", "league", "kind", "stage", "period", "split", "opponent", "oi", "side", "result", "game",
                "series", "s_result", "minutes", "kills", "deaths", "fb", "fd", "fh", "ft", "dragons", "grubs", "barons", "towers",
-               "inhibs", "gd15", "csd15", "xpd15", "dpm", "wpm", "vspm", "picks", "bans", "elo_before", "elo_after"]
+               "inhibs", "gd15", "csd15", "xpd15", "dpm", "wpm", "vspm", "picks", "bans", "elo_before", "elo_after", "gn"]
 TEAM_SUMMARY_FIELDS = ["team", "league", "kind", "period", "split", "stage", "games", "wins", "s_won", "s_lost",
                        "gd_n", "gd_sum", "blue_games", "blue_wins", "first", "last", "elo"]
 TEAM_INDEX_FIELDS = ["name", "league", "games", "files"]
@@ -590,6 +591,8 @@ def tidy(p, kind):
         "opponent": p["opponent"], "champion": p["champion"], "result": p["result"],
         "minutes": p["minutes"].round(1), "kills": p["kills"], "deaths": p["deaths"], "assists": p["assists"],
         "gd15": p["golddiffat15"],
+        "cs": (p["total cs"] if "total cs" in p.columns else p["cspm"] * p["gamelength"] / 60).round(0),
+        "dpm": p["dpm"].round(0), "vspm": p["vspm"].round(2),
         "r_early": p["r_early"], "r_late": p["r_late"], "r_overall": p["r_overall"],
         "playerid": p["playerid"], "baseline": p["baseline"],
     })
@@ -744,6 +747,7 @@ def team_games(parts, roster):
     sid = (gm["pair"] + "|" + gm["series"]).set_axis(gm["gameid"])
     t["series"] = pd.factorize(t["gameid"].map(sid))[0]
     t = t.drop(columns="pair")
+    t["gn"] = t.groupby("series")["gameid"].transform(lambda s: pd.factorize(s)[0] + 1)   # game number in the series
     sw = t.groupby(["series", "ti"])["result"].agg(["sum", "size"])
     t["s_result"] = None
     last = t.groupby(["series", "ti"]).tail(1).index
@@ -811,7 +815,7 @@ def team_games(parts, roster):
         "picks": [[x for x in row if isinstance(x, str)] for row in t[[f"pick{i}" for i in range(1, 6)]].to_numpy()],
         "bans": [[x for x in row if isinstance(x, str)] for row in t[[f"ban{i}" for i in range(1, 6)]].to_numpy()],
         "elo_before": t["elo_before"], "elo_after": t["elo_after"], "year": t["date"].dt.year, "gameid": t["gameid"],
-        "home": t["home"], "tour": t["tour"], "comp": t["comp"],
+        "home": t["home"], "tour": t["tour"], "comp": t["comp"], "gn": t["gn"],
     })
     return out, keys, rep
 
@@ -1184,6 +1188,8 @@ def dump(path, obj):
 
 def write_site_data(games, c_by_role, cfg, out_dir, leagues, complete, tg, team_keys, elo_report, tours, links, raw):
     """Writes index.json, summary/<year>.json, games/<year>/<league>.json and teams/<year>/<league>.json."""
+    sg = tg.drop_duplicates("gameid").set_index("gameid")
+    games = games.assign(series=games["gameid"].map(sg["series"]), gn=games["gameid"].map(sg["gn"]))
     g_out = games[GAME_FIELDS + ["year", "playerid", "gameid"]].copy()
     # which team (index into the team list) each player-game belongs to
     ti_of = dict(zip(zip(tg["gameid"], tg["team"]), tg["ti"]))
