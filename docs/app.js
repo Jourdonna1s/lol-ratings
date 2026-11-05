@@ -221,6 +221,15 @@ function teamBoard(L){
 // latest split of each league: its latest split (by last game) with at least 3/4 of the league's median number of teams;
 // final stages (VCS Finals, EBL Finals, LES Final Four) don't count as a split. Ranked now: teams that played in it
 // (on a combined board: in their own league's latest split)
+// years with data per league (from the file lists in the index), so the year filter offers only those years
+const LY={},ISI=new Set(C.international||[]);
+for(const o of [...list,...teams])for(const k of o.files||[]){const l=k.slice(5);(LY[l]=LY[l]||new Set()).add(k.slice(0,4))}
+const has=(l,y)=>!!LY[l]&&LY[l].has(y);
+const boardYears=L=>YEARS.filter(y=>L=='all'||(L==INTL?[...ISI].some(l=>has(l,y)):L=='major'?Object.keys(LY).some(l=>has(l,y)&&(ISI.has(l)||TY(l,y)=='major')):has(L,y)));
+// player and team pages: the years of their games in league L
+const rowYears=(rows,L)=>YEARS.filter(y=>rows.some(g=>yr(g)==y&&inL(g,L)));
+// the year to show when the chosen one has no data: the latest year with data (else all years)
+const fitYear=(cur,av)=>cur=='all'||av.includes(cur)?cur:av.length?av[av.length-1]:'all';
 const LATEST={},TLAST={},TLASTO={},SPT={},SPO={},ACTIVE=new Set(),PLAST={};
 function deriveLatest(){for(const o of [LATEST,TLAST,TLASTO,SPT,SPO,PLAST])for(const k in o)delete o[k];ACTIVE.clear();
 for(const c of TS){const L=c[F.league],P=c[F.period];if(P==null)continue;
@@ -286,7 +295,8 @@ function groups(lgs){
   return G.map(([t,f])=>[t,lgs.filter(f)]).filter(([,ls])=>ls.length);
 }
 // shared filter bar: one row of dropdowns (league, split/event, stage, year, and role on the player leaderboard)
-function filters(el,lgs,L,setL,redraw,roles){
+function filters(el,lgs,L,setL,redraw,roles,rows){
+  const avY=L2=>rows?rowYears(rows,L2):boardYears(L2),av=avY(L);
   const sl=splits(L),on=st.split!='all'||st.stage!='all'||yv()!=YDEF()||(roles&&st.role!='all');
   const note=COMB(L)?regions(st.split):L!=INTL&&rname(L,st.split)?L+' '+rname(L,st.split):'';
   const opt=(items,cur)=>items.map(([k,l,t])=>`<option value="${esc(k)}"${k==cur?' selected':''}${t?` title="${esc(t)}"`:''}>${esc(l)}</option>`).join('');
@@ -295,16 +305,19 @@ function filters(el,lgs,L,setL,redraw,roles){
   <select id="f-lg" aria-label="League">${groups(lgs).map(([t,ls])=>`<optgroup label="${t}">${opt(ls.map(l=>[l,LN(l)]),L)}</optgroup>`).join('')}</select>
   ${sl.length?sel('f-sp',L==INTL?'Event':'Split',[['all',L==INTL?'All events':'All splits'],...sl.map(s=>{const r=L==INTL?'':rname(L,s);return[s,s,COMB(L)?regions(s):r?`${L} calls it ${r}`:'']})],st.split):''}
   ${sel('f-st','Stage',[['all','All stages'],['regular','Regular season'],['playoffs','Playoffs']],st.stage)}
-  ${sel('f-yr','Year',[['all','All years'],...YEARS.slice().reverse().map(y=>[y,y])],yv())}
+  ${sel('f-yr','Year',[['all','All years'],...av.slice().reverse().map(y=>[y,y])],yv())}
   ${roles?sel('f-rl','Role',[['all','All roles'],...Object.entries(RL)],st.role):''}
   ${on?'<button class="link" id="f-reset">Reset</button>':''}</div>
   ${sl.length&&st.split!='all'&&(note||tourFor(L))?`<div class="mut sm fnote">${note?`${esc(st.split)} = ${esc(note)}`:''}${note&&tourFor(L)?' · ':''}${tourFor(L)?`<a href="#${tourFor(L).slug}">${esc(tourFor(L).short)} ${tourFor(L).year}: standings and results →</a>`:''}</div>`:''}`;
   const ch=(id,f)=>{const s=el.querySelector('#'+id);if(s)s.onchange=()=>{f(s.value);st.all=st.tall=0;redraw()}};
-  ch('f-lg',k=>{setL(k);st.split='all'});
+  // a league without data in the chosen year: its latest year instead
+  const lh=el.querySelector('#f-lg');if(lh)lh.onchange=async()=>{const k=lh.value,y=fitYear(yv(),avY(k));
+    if(YK=='year'&&y!=yv()){lh.disabled=true;try{await ensureYears(yearsFor(y))}catch(e){lh.disabled=false;return}}
+    setL(k);st.split='all';st[YK]=y;st.all=st.tall=0;redraw()};
   ch('f-sp',k=>st.split=k);ch('f-st',k=>st.stage=k);const yh=el.querySelector('#f-yr');if(yh)yh.onchange=async()=>{const k=yh.value;
     if(YK=='year'){yh.disabled=true;try{await ensureYears(yearsFor(k))}catch(e){yh.disabled=false;return}}
     st[YK]=k;if(!splits(L).includes(st.split))st.split='all';st.all=st.tall=0;redraw()};ch('f-rl',k=>st.role=k);
-  const r=el.querySelector('#f-reset');if(r)r.onclick=()=>{st.split=st.stage='all';st[YK]=YDEF();if(roles)st.role='all';st.all=st.tall=0;redraw()};
+  const r=el.querySelector('#f-reset');if(r)r.onclick=()=>{st.split=st.stage='all';st[YK]=fitYear(YDEF(),av);if(roles)st.role='all';st.all=st.tall=0;redraw()};
 }
 // the tournament behind a single-league board with one split chosen (the latest one in the chosen year)
 const tourFor=L=>{if(st.split=='all'||COMB(L))return null;
@@ -396,11 +409,12 @@ function drawTeams(){
 function playerPage(p){
   const ls=[...LEAGUES,...EVENTS,INTL].filter(l=>p.games.some(g=>inL(g,l)));
   if(st.plg!='all'&&!ls.includes(st.plg))st.plg='all';
+  st.pyear=fitYear(st.pyear,rowYears(p.games,st.plg));
   const gs=p.games.filter(g=>keep(g,st.plg)),dom=gs.filter(g=>g[F.kind]=='domestic'),intl=gs.filter(g=>g[F.kind]=='international'),n=gs.length;
   const head=header('players')+`<a href="#players">← Player leaderboards</a>
   <h1 style="margin-top:8px">${esc(p.name)}</h1>
   <div class="mut">${RL[p.role]} · ${tlink(p.team,null,p.league)} · ${esc(p.league)}${tag(p.league)}${(o=>o.length?' · '+esc(o.join(', ')):'')([...new Set(p.games.map(g=>g[F.league]))].filter(l=>l!=p.league))}</div>`;
-  const redraw=()=>{st.pg=0;playerPage(p)},bar=()=>filters(document.getElementById('fb'),['all',...ls],st.plg,k=>st.plg=k,redraw);
+  const redraw=()=>{st.pg=0;playerPage(p)},bar=()=>filters(document.getElementById('fb'),['all',...ls],st.plg,k=>st.plg=k,redraw,0,p.games);
   if(!n){
     app.innerHTML=head+`<div id="fb" style="margin-top:14px"></div><p class="mut">No games for this player in the selected filters. Change or reset the filters above.</p>`;
     bar();wireSearch();return;
@@ -491,6 +505,7 @@ function eloChart(el,gs){
 function teamPage(t){
   const ls=[...LEAGUES,...EVENTS,INTL].filter(l=>t.rows.some(g=>inL(g,l)));
   if(st.tlg!='all'&&!ls.includes(st.tlg))st.tlg='all';
+  st.pyear=fitYear(st.pyear,rowYears(t.rows,st.tlg));
   const gs=t.rows.filter(g=>keep(g,st.tlg)),n=gs.length,R=g=>g.r;
   const others=[...new Set(t.rows.map(g=>g[F.league]))].filter(l=>l!=t.league);
   // rank by each team's latest Elo, among the teams of its league and among all teams
@@ -501,7 +516,7 @@ function teamPage(t){
   <h1 style="margin-top:8px">${esc(t.name)}</h1>
   <div class="mut">${esc(NAME(t.league))}${tag(t.league)}${others.length?' · '+esc(others.join(', ')):''} · Elo now ${Math.round(NOW[t.i]??last.r[TF.elo_after])} · ${rank.lg?`#${rank.lg} of ${rank.of} in ${esc(t.league)} · #${rank.all} of ${rank.ofAll} teams`:`not ranked (no games in the latest ${esc(t.league)} split${LATEST[t.league]?', '+esc(LATEST[t.league].p):''})`}</div>
   ${(AWT[t.i]||[]).some(a=>a.kind=='champion')?`<div class="sm" style="margin-top:4px"><b>Titles:</b> ${AWT[t.i].filter(a=>a.kind=='champion').length} · <a href="#cab">trophy cabinet ↓</a></div>`:''}`;
-  const redraw=()=>{st.tpg=0;teamPage(t)},bar=()=>filters(document.getElementById('fb'),['all',...ls],st.tlg,k=>st.tlg=k,redraw);
+  const redraw=()=>{st.tpg=0;teamPage(t)},bar=()=>filters(document.getElementById('fb'),['all',...ls],st.tlg,k=>st.tlg=k,redraw,0,t.rows);
   if(!n){
     app.innerHTML=head+`<div id="fb" style="margin-top:14px"></div><p class="mut">No games for this team in the selected filters. Change or reset the filters above.</p>`;
     bar();wireSearch();return;
@@ -528,7 +543,7 @@ function teamPage(t){
     return`<tr><td>${l}</td><td><b>${fmt(v,d)}</b></td><td>${fmt(a,d)}</td><td class="mut">${rk}</td></tr>`}).join('');
   // roster: the players' ratings for this team in the selection (from the summary)
   const ros=new Map();
-  for(const c of SUM){if(c.ti!=t.i||!keep(c,st.tlg))continue;const a=ros.get(c.pi)||ros.set(c.pi,{p:list[c.pi],games:0,s:{n:0,sw:0,swd:0,sw2:0,s1:0,s2:0}}).get(c.pi);a.games+=c.games;addSums(a.s,c.sums)}
+  for(const c of SUM){if(c.ti!=t.i||!keep(c,st.tlg))continue;const a=ros.get(c.pi)||ros.set(c.pi,{p:list[c.pi],games:0,ys:new Set(),s:{n:0,sw:0,swd:0,sw2:0,s1:0,s2:0}}).get(c.pi);a.games+=c.games;a.ys.add(+c[F.date]);addSums(a.s,c.sums)}
   const RO=Object.keys(RL);
   const roster=[...ros.values()].map(a=>({...a,r:rateSums(a.s,a.p.role)})).sort((a,b)=>RO.indexOf(a.p.role)-RO.indexOf(b.p.role)||b.games-a.games);
   // current players: played for the team in its latest split and still play for it (their latest team);
@@ -540,6 +555,11 @@ function teamPage(t){
   // not current: former (played league games for the team) or event stand-ins (only events, e.g. academy players at a cup)
   const lg={};for(const c of SUM)if(c.ti==t.i&&c[F.kind]=='domestic')lg[c.pi]=1;
   const subs=roster.filter(a=>cur(a)&&!starters.includes(a)),former=roster.filter(a=>!cur(a)&&lg[a.p.i]),standin=roster.filter(a=>!cur(a)&&!lg[a.p.i]);
+  // all years: one list, newest players first, with the years they played for the team ("2019–2021, 2023")
+  const span=ys=>{const v=[...ys].sort((a,b)=>a-b),out=[];for(const y of v){const l=out[out.length-1];if(l&&y==l[1]+1)l[1]=y;else out.push([y,y])}
+    return out.map(([a,b])=>a==b?a:a+'–'+b).join(', ')};
+  const allRows=[...roster].sort((a,b)=>Math.max(...b.ys)-Math.max(...a.ys)||Math.min(...b.ys)-Math.min(...a.ys)||RO.indexOf(a.p.role)-RO.indexOf(b.p.role)||b.games-a.games);
+  const yrow=a=>`<tr><td><a href="#${a.p.slug}">${esc(a.p.name)}</a></td><td>${RL[a.p.role]}</td><td class="nw">${span(a.ys)}</td><td>${a.games}</td><td class="${a.r?rc(a.r.x):''}">${a.r?`<b>${f2(a.r.x)}</b> <span class="mut sm">${f2(a.r.lo)}–${f2(a.r.hi)}</span>`:'—'}</td></tr>`;
   const prow=a=>`<tr><td><a href="#${a.p.slug}">${esc(a.p.name)}</a></td><td>${RL[a.p.role]}</td><td>${a.games}</td><td class="${a.r?rc(a.r.x):''}">${a.r?`<b>${f2(a.r.x)}</b> <span class="mut sm">${f2(a.r.lo)}–${f2(a.r.hi)}</span>`:'—'}</td></tr>`;
   // draft: picks (with win rate), bans by the team, bans against it (the other side's bans in the same game)
   const other={};t.all.forEach(g=>other[g.r[TF.series]+'|'+g.r[TF.game]+'|'+g.r[TF.ti]]=g.r);
@@ -557,13 +577,15 @@ function teamPage(t){
   <div class="cards">${card('Elo after last game · '+esc(selection(st.tlg)),Math.round(e1),`${dE>=0?'+':''}${Math.round(dE)} over ${n} games`,1)}
     ${card('Record',`${W}-${n-W}`,`${Math.round(100*W/n)}% of games`)}${card('Series',`${sw}-${ser.length-sw}`,'Bo1, Bo3 or Bo5 against one opponent')}
     ${card('Win % blue / red',`${sb.pct} / ${sr.pct}`,`${sb.rec} · ${sr.rec}`)}</div>
-  <div id="cab">${cabinet(AWT[t.i]||[],AWTP[t.i])}</div>
-  <h2>Roster</h2><div class="tw"><table><tr><th>Starting lineup</th><th>Role</th><th>Games</th><th>Rating</th></tr>
+  <div id="cab">${cabinet(AWT[t.i]||[])}</div>
+  <h2>Roster</h2>${yv()=='all'?`<div class="tw"><table><tr><th>Player</th><th>Role</th><th>Years</th><th>Games</th><th>Rating</th></tr>
+  ${allRows.map(yrow).join('')||'<tr><td colspan="5" class="mut">No rated player games.</td></tr>'}</table></div>
+  <p class="mut sm">Everyone who played for the team in the selection, with the years they played for it. Player performance ratings in this team’s games (not a measure of skill).</p>`:`<div class="tw"><table><tr><th>Starting lineup</th><th>Role</th><th>Games</th><th>Rating</th></tr>
   ${starters.map(prow).join('')||'<tr><td colspan="4" class="mut">No rated player games.</td></tr>'}
   ${subs.length?`<tr class="subh"><th>Subs</th><th></th><th></th><th></th></tr>${subs.map(prow).join('')}`:''}
   ${former.length?`<tr class="subh"><th>Former</th><th></th><th></th><th></th></tr>${former.map(prow).join('')}`:''}
   ${standin.length?`<tr class="subh"><th>Event stand-ins</th><th></th><th></th><th></th></tr>${standin.map(prow).join('')}`:''}</table></div>
-  <p class="mut sm">Player performance ratings in this team’s games (not a measure of skill). Starting lineup and subs: players in the team’s latest split${TS_?` (${esc(t.league)} ${esc(TS_)})`:''} who still play for it; the starter is the one with the most games in each role there. Former: played league games for the team and no longer play for it. Event stand-ins: played only events for it (e.g. academy players at a cup).</p>
+  <p class="mut sm">Player performance ratings in this team’s games (not a measure of skill). Starting lineup and subs: players in the team’s latest split${TS_?` (${esc(t.league)} ${esc(TS_)})`:''} who still play for it; the starter is the one with the most games in each role there. Former: played league games for the team and no longer play for it. Event stand-ins: played only events for it (e.g. academy players at a cup).</p>`}
   <h2>Elo</h2><div class="card chart" id="elo"></div>
   <p class="mut sm">${esc(ELO_NOTE)}</p>
   <h2>Stats vs ${esc(LN(CL))} average</h2><div class="tw"><table><tr><th>Stat</th><th>${esc(t.name)}</th><th>${esc(LN(CL))} average</th><th>Rank</th></tr>${srows}</table></div>
@@ -821,6 +843,7 @@ async function route(){
     st.mg=/^g\d+$/.test(gp||'')?+gp.slice(1):'all';matchPage(s,pf);
   }else if(h=='events')eventsPage();
   else if(h=='players'||h=='teams'){
+    st.year=fitYear(st.year,boardYears(st.lg));
     if(!yearsFor(st.year).every(y=>SLOADED.has(y))){app.innerHTML='<p class="mut">Loading…</p>';
       try{await ensureYears(yearsFor(st.year))}catch(err){app.innerHTML='<p>Could not load the leaderboards. <a href="#home">Back to the main page</a></p>';return}
       if(my!=nav)return}
