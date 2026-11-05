@@ -61,3 +61,7 @@ footer{max-width:960px;margin:0 auto;padding:0 16px 32px;color:var(--mut);font-s
 @media (max-width:600px){.cab{grid-column:1/-1}.srch{flex-basis:100%}.fbar{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}.fbar select{width:100%;font-size:14px;padding:8px 26px 8px 12px;background-position:right 14px center,right 9px center}.fbar #f-lg{grid-column:span 2}
 th,td{padding:8px}.lbt .rng{display:block;font-size:12px}.tbt .hm{display:none}.nw{font-size:22px}.prev{grid-template-columns:1fr}}
 .ch{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}.ch img{width:20px;height:20px;border-radius:4px;flex:none}
+h1.mh{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 12px}h1.mh .sc{font-variant-numeric:tabular-nums}h1.mh .lost a{color:var(--mut)}
+h3.mth{font-size:15px;margin:16px 0 6px}.mct td:first-child{white-space:nowrap}
+.chl{display:flex;flex-wrap:wrap;gap:6px 12px;margin-top:4px}.chl.bans{opacity:.7}.mpt td.pl .ch{margin-right:6px}
+.chi{width:24px;height:24px;border-radius:4px;vertical-align:middle;margin-right:2px}

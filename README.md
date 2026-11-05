@@ -52,6 +52,8 @@ docs/img/champions/ (--force: all again). The daily Action runs it too.
     #teams       team leaderboards          #t-<team>            team page
     #events      tournaments                #e-<name>-<year>     tournament page: format, stages (tables, places or results), champion,
                                                                  qualified from (by region), top players, draft, records
+    #m-<league>-<date>-<team>-<team>                             match page: one per series (/g2 = game 2): result, Elo,
+                                                                 games, team stats, draft, players with their ratings
 
 Team strength is an Elo rating (pipeline/team_elo.py): from game results only, a separate method from the player ratings.
 
