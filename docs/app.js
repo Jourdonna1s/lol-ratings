@@ -82,14 +82,16 @@ const legend=()=>{const ss=[...new Set(MAJ.flatMap(splits))];
 
 // players and teams come from the index; their games are loaded on their page only
 const PF={};D.players.fields.forEach((k,i)=>PF[k]=i);
-const list=D.players.rows.map((r,i)=>({i,name:r[PF.name],role:r[PF.role],team:r[PF.team],league:r[PF.league],ngames:r[PF.games],files:r[PF.files],games:null})),seen={};
+// the files lists hold positions in D.file_keys ("year/league")
+const FKS=D.file_keys||[],fk=a=>(a||[]).map(n=>typeof n=='number'?FKS[n]:n);
+const list=D.players.rows.map((r,i)=>({i,name:r[PF.name],role:r[PF.role],team:r[PF.team],league:r[PF.league],ngames:r[PF.games],files:fk(r[PF.files]),games:null})),seen={};
 list.forEach(p=>{
   let s='p-'+slugify(p.name)+'-'+p.role;
   seen[s]=(seen[s]||0)+1;if(seen[s]>1)s+='-'+seen[s];
   p.slug=s;p.n=norm(p.name).toLowerCase();
 });
 const XF={};((D.teams||{}).fields||[]).forEach((k,i)=>XF[k]=i);
-const teams=((D.teams||{}).rows||[]).map((r,i)=>({i,name:r[XF.name],league:r[XF.league],ngames:r[XF.games],files:r[XF.files],rows:null})),tseen={},byName={};
+const teams=((D.teams||{}).rows||[]).map((r,i)=>({i,name:r[XF.name],league:r[XF.league],ngames:r[XF.games],files:fk(r[XF.files]),rows:null})),tseen={},byName={};
 teams.forEach(t=>{
   let s='t-'+slugify(t.name);
   tseen[s]=(tseen[s]||0)+1;if(tseen[s]>1)s+='-'+tseen[s];
