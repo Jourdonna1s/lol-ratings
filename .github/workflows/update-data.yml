@@ -21,9 +21,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.14"
           cache: pip
@@ -32,16 +32,25 @@ jobs:
       - name: Install packages
         run: python -m pip install -r pipeline/requirements.txt
 
-      - name: Keep past years' files between runs
-        uses: actions/cache@v4
+      # past years' files (<year>_<Drive file id>.csv), so only the current year is downloaded each day; a past
+      # year that Drive refuses ("too many users", it lifts within a day) falls back to its cached copy
+      - name: Restore past years' files
+        uses: actions/cache/restore@v5
         with:
           path: oe_cache
-          key: oe-${{ hashFiles('pipeline/data_sources.json') }}
+          key: oe-none
           restore-keys: oe-
 
       - name: Download Oracle's Elixir files
         working-directory: pipeline
         run: python fetch_data.py --cache ../oe_cache
+
+      - name: Save past years' files
+        if: always() && hashFiles('oe_cache/*.csv') != ''
+        uses: actions/cache/save@v5
+        with:
+          path: oe_cache
+          key: oe-${{ hashFiles('oe_cache/*.csv') }}
 
       - name: Build site data
         working-directory: pipeline
