@@ -56,11 +56,15 @@ jobs:
         working-directory: pipeline
         run: python build_site_data.py
 
+      - name: Champion icons (new champions only)
+        working-directory: pipeline
+        run: python fetch_images.py
+
       - name: Open or update the pull request
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          git add -A docs/data
+          git add -A docs/data docs/img
           if git diff --cached --quiet; then
             echo "No change in docs/data."
             exit 0
@@ -76,7 +80,7 @@ jobs:
           {
             echo "Automatic data update from Oracle's Elixir: games up to **$until**."
             echo
-            echo "Changed: $(git diff --name-only HEAD~1 | wc -l) files in docs/data."
+            echo "Changed: $(git diff --name-only HEAD~1 | wc -l) files in docs/data and docs/img."
             if [ -n "$past" ]; then
               echo
               echo "⚠️ Past years changed too (check before merging): $past"
