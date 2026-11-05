@@ -4,3 +4,6 @@ __pycache__/
 .venv/
 .DS_Store
 award_picks/
+oe_cache/
+*.part
+pr_body.md

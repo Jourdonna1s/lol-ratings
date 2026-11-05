@@ -21,6 +21,17 @@ Open http://localhost:8000 (double-clicking index.html will not work, the browse
        git commit -m "update ratings"
        git push -u origin update-ratings
 
+## Automatic updates (GitHub Action)
+.github/workflows/update-data.yml runs daily at 06:00 UTC (or by hand: Actions tab > Update data > Run workflow).
+It downloads the files listed in pipeline/data_sources.json (Google Drive file ids from Oracle's Elixir's
+downloads page) with pipeline/fetch_data.py, runs build_site_data.py, and when docs/data changed it opens or
+updates a pull request from the data-update branch. Merging it publishes the update. The site footer shows the
+date of the latest game ("Games up to ..."), index.json "data_until".
+- Repo setting needed once: Settings > Actions > General > Workflow permissions > "Allow GitHub Actions to create
+  and approve pull requests".
+- A new year: add its file id to data_sources.json and its settings to YEARS.
+- If a run fails at the download (wrong id, file moved, Drive's download limit), nothing changes on the site.
+
 ## Data files (docs/data/, generated)
     index.json               config, years, list of game files, player and team index (search, which files each is in), Elo settings,
                              tournaments (one per league split, event and international event) and qualification links

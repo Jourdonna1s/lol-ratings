@@ -1,0 +1,83 @@
+# Daily data update: download the Oracle's Elixir files, rebuild docs/data, and open (or update) a pull request
+# from the data-update branch when the data changed. Merging the PR publishes it (GitHub Pages serves /docs).
+# File ids: pipeline/data_sources.json. The CSVs are never committed.
+name: Update data
+
+on:
+  schedule:
+    - cron: "0 6 * * *"     # daily, 06:00 UTC
+  workflow_dispatch:         # run by hand: Actions tab > Update data > Run workflow
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: update-data
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: pipeline/requirements.txt
+
+      - name: Install packages
+        run: python -m pip install -r pipeline/requirements.txt
+
+      - name: Keep past years' files between runs
+        uses: actions/cache@v4
+        with:
+          path: oe_cache
+          key: oe-${{ hashFiles('pipeline/data_sources.json') }}
+          restore-keys: oe-
+
+      - name: Download Oracle's Elixir files
+        working-directory: pipeline
+        run: python fetch_data.py --cache ../oe_cache
+
+      - name: Build site data
+        working-directory: pipeline
+        run: python build_site_data.py
+
+      - name: Open or update the pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git add -A docs/data
+          if git diff --cached --quiet; then
+            echo "No change in docs/data."
+            exit 0
+          fi
+          until=$(python -c "import json; print(json.load(open('docs/data/index.json', encoding='utf-8'))['data_until'])")
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -q -m "Data update: games up to $until"
+          git push -f origin HEAD:data-update
+
+          # past years should only change when their file or the pipeline changed: flag it in the PR
+          past=$(git diff --name-only HEAD~1 -- docs/data/summary | grep -v "summary/$(date -u +%Y).json" || true)
+          {
+            echo "Automatic data update from Oracle's Elixir: games up to **$until**."
+            echo
+            echo "Changed: $(git diff --name-only HEAD~1 | wc -l) files in docs/data."
+            if [ -n "$past" ]; then
+              echo
+              echo "⚠️ Past years changed too (check before merging): $past"
+            fi
+            echo
+            echo "Built by the [Update data workflow]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)."
+          } > pr_body.md
+
+          if [ "$(gh pr list --head data-update --state open --json number --jq length)" = "0" ]; then
+            gh pr create --head data-update --base main --title "Data update: games up to $until" --body-file pr_body.md
+          else
+            gh pr edit data-update --title "Data update: games up to $until" --body-file pr_body.md
+          fi
