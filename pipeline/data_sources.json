@@ -1,6 +1,5 @@
 {
-  "_about": "Google Drive file id of each year's Oracle's Elixir match-data CSV (from oracleselixir.com/tools/downloads). Used by fetch_data.py and the Update data GitHub Action. Empty = not downloaded.",
-  "2024": "",
-  "2025": "",
-  "2026": ""
+  "_about": "Oracle's Elixir's public Google Drive folder (linked from oracleselixir.com/tools/downloads) and the years the site uses. fetch_data.py lists the folder and downloads <year>_LoL_esports_match_data_from_OraclesElixir.csv for each year. A new year: add it here and its settings to YEARS in build_site_data.py.",
+  "folder": "1gLSw0RLjBbtaNy0dgnGQDAZOHIgCe-HH",
+  "years": [2024, 2025, 2026]
 }

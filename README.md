@@ -23,14 +23,16 @@ Open http://localhost:8000 (double-clicking index.html will not work, the browse
 
 ## Automatic updates (GitHub Action)
 .github/workflows/update-data.yml runs daily at 06:00 UTC (or by hand: Actions tab > Update data > Run workflow).
-It downloads the files listed in pipeline/data_sources.json (Google Drive file ids from Oracle's Elixir's
-downloads page) with pipeline/fetch_data.py, runs build_site_data.py, and when docs/data changed it opens or
+It lists Oracle's Elixir's public Google Drive folder (pipeline/data_sources.json: folder id and years) and
+downloads each year's file with pipeline/fetch_data.py (past years cached), runs build_site_data.py, and when docs/data changed it opens or
 updates a pull request from the data-update branch. Merging it publishes the update. The site footer shows the
 date of the latest game ("Games up to ..."), index.json "data_until".
 - Repo setting needed once: Settings > Actions > General > Workflow permissions > "Allow GitHub Actions to create
   and approve pull requests".
-- A new year: add its file id to data_sources.json and its settings to YEARS.
-- If a run fails at the download (wrong id, file moved, Drive's download limit), nothing changes on the site.
+- A new year: add it to "years" in data_sources.json and its settings to YEARS.
+- Drive limits downloads of popular files ("Too many users have viewed or downloaded this file recently", lifts
+  within a day): a past year then uses its cached copy; if the current year is refused the run fails and nothing
+  changes on the site until the next run.
 
 ## Data files (docs/data/, generated)
     index.json               config, years, list of game files, player and team index (search, which files each is in), Elo settings,
