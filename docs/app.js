@@ -2,10 +2,14 @@
 const app=document.getElementById('app');
 const getJSON=async u=>{const r=await fetch(u);if(!r.ok)throw new Error(u+' '+r.status);return r.json()};
 let D,SF;
-try{D=await getJSON('data/index.json');SF=await Promise.all(D.years.map(y=>getJSON(`data/summary/${y}.json`)))}
+let CI=new Set();
+try{const ci=getJSON('img/champions.json').catch(()=>[]);D=await getJSON('data/index.json');SF=await Promise.all(D.years.map(y=>getJSON(`data/summary/${y}.json`)));CI=new Set(await ci)}
 catch(e){app.innerHTML='<p>Could not load data/index.json. If you opened index.html by double-clicking, start a local server first (see README.md).</p>';return}
 if(D.data_until){const ft=document.querySelector('footer'),dt=new Date(D.data_until+'T12:00:00Z');
   if(ft)ft.prepend(`Games up to ${dt.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric',timeZone:'UTC'})}. `)}
+// champion name with its icon (Riot's Data Dragon), when there is one
+const ckey=n=>String(n).toLowerCase().replace(/[^a-z0-9]/g,'');
+const champ=n=>n==null?'—':CI.has(ckey(n))?`<span class="ch"><img src="img/champions/${ckey(n)}.webp" alt="" width="20" height="20" loading="lazy">${esc(n)}</span>`:esc(n);
 const F={},TF={};
 D.game_fields.forEach((f,i)=>F[f]=i);(D.team_fields||[]).forEach((f,i)=>TF[f]=i);
 const C=D.config,MIN=C.min_games||15,LEAGUES=C.leagues||C.tier1,EVENTS=C.events||[],EV=new Set(EVENTS),TIER=C.tiers||{},
@@ -375,9 +379,9 @@ function playerPage(p){
   ${stat('K / D / A per game',(K/n).toFixed(1)+' / '+(De/n).toFixed(1)+' / '+(A/n).toFixed(1))}
   ${stat('Gold diff @15',gd.length?Math.round(gd.reduce((a,g)=>a+g[F.gd15],0)/gd.length):'—')}</div>
   <h2>Champions</h2><div class="tw"><table><tr><th>Champion</th><th>Games</th><th>Win rate</th><th>KDA</th></tr>
-  ${champs.map(([c,v])=>`<tr><td>${esc(c)}</td><td>${v.n}</td><td>${(100*v.w/v.n).toFixed(0)}%</td><td>${((v.k+v.a)/Math.max(v.d,1)).toFixed(2)}</td></tr>`).join('')}</table></div>
+  ${champs.map(([c,v])=>`<tr><td>${champ(c)}</td><td>${v.n}</td><td>${(100*v.w/v.n).toFixed(0)}%</td><td>${((v.k+v.a)/Math.max(v.d,1)).toFixed(2)}</td></tr>`).join('')}</table></div>
   <h2>Games</h2><div class="tw"><table><tr><th>Date</th><th>Rating</th><th></th><th>vs</th><th>Champion</th><th>K/D/A</th><th>GD@15</th><th>Event</th></tr>
-  ${shown.map(g=>`<tr><td>${g[F.date]}</td><td class="${rc(g[F.r_overall])}"><b>${f2(g[F.r_overall])}</b></td><td class="${g[F.result]?'good':'bad'}">${g[F.result]?'W':'L'}</td><td>${g[F.opponent]?tlink(g[F.opponent],null,g[F.league]):'—'}</td><td>${esc(g[F.champion])}</td><td>${g[F.kills]}/${g[F.deaths]}/${g[F.assists]}</td><td>${g[F.gd15]==null?'—':Math.round(g[F.gd15])}</td><td>${elink(g,ev(g))}</td></tr>`).join('')}</table></div>
+  ${shown.map(g=>`<tr><td>${g[F.date]}</td><td class="${rc(g[F.r_overall])}"><b>${f2(g[F.r_overall])}</b></td><td class="${g[F.result]?'good':'bad'}">${g[F.result]?'W':'L'}</td><td>${g[F.opponent]?tlink(g[F.opponent],null,g[F.league]):'—'}</td><td>${champ(g[F.champion])}</td><td>${g[F.kills]}/${g[F.deaths]}/${g[F.assists]}</td><td>${g[F.gd15]==null?'—':Math.round(g[F.gd15])}</td><td>${elink(g,ev(g))}</td></tr>`).join('')}</table></div>
   ${!st.pg&&rec.length>20?`<button class="more" id="mg">Show all ${rec.length}</button>`:''}`;
   bar();wireSearch();
   const mg=document.getElementById('mg');if(mg)mg.onclick=()=>{st.pg=1;playerPage(p)};
@@ -495,7 +499,7 @@ function teamPage(t){
   const picks=count(mine.flatMap(r=>(r[TF.picks]||[]).map(ch=>[ch,r[TF.result]])));
   const bans=count(mine.flatMap(r=>(r[TF.bans]||[]).map(ch=>[ch,0])));
   const bansVs=count(mine.flatMap(r=>((other[r[TF.series]+'|'+r[TF.game]+'|'+r[TF.oi]]||{})[TF.bans]||[]).map(ch=>[ch,0])));
-  const dl=(title,rows,wr)=>`<div><h3>${title}</h3><table>${rows.map(([c,x])=>`<tr><td>${esc(c)}</td><td>${x.n}</td>${wr?`<td class="mut">${Math.round(100*x.w/x.n)}%</td>`:''}</tr>`).join('')||'<tr><td class="mut">—</td></tr>'}</table></div>`;
+  const dl=(title,rows,wr)=>`<div><h3>${title}</h3><table>${rows.map(([c,x])=>`<tr><td>${champ(c)}</td><td>${x.n}</td>${wr?`<td class="mut">${Math.round(100*x.w/x.n)}%</td>`:''}</tr>`).join('')||'<tr><td class="mut">—</td></tr>'}</table></div>`;
   const rec=gs.slice().reverse(),shown=st.tpg?rec:rec.slice(0,20);
   const fin=new Map();(TITLES[t.i]||[]).forEach(([c,d,b])=>{const g=rec.find(g=>g.r[TF.date]==d&&c.startsWith(g.r[TF.league]));if(g)fin.set(g,b)});
   const ev=r=>r[TF.league]+(r[TF.split]||r[TF.period]?' '+esc(SPN(r[TF.league],r[TF.split])||r[TF.period]):'')+(r[TF.stage]=='playoffs'?' (playoffs)':'');
@@ -609,7 +613,7 @@ function tourPage(e){
   for(const rs of G.values()){const seen=new Set();for(const r of rs){for(const c of r[TF.picks]||[]){const x=pk[c]=pk[c]||{n:0,w:0};x.n++;x.w+=r[TF.result];seen.add(c)}
     for(const c of r[TF.bans]||[]){bn[c]=(bn[c]||0)+1;seen.add(c)}}seen.forEach(c=>pr[c]=(pr[c]||0)+1)}
   const top=(o,f)=>Object.entries(o).sort((a,b)=>f(b[1])-f(a[1])).slice(0,8);
-  const dl=(title,rows,cell)=>`<div><h3>${title}</h3><table>${rows.map(([c,x])=>`<tr><td>${esc(c)}</td>${cell(x)}</tr>`).join('')||'<tr><td class="mut">—</td></tr>'}</table></div>`;
+  const dl=(title,rows,cell)=>`<div><h3>${title}</h3><table>${rows.map(([c,x])=>`<tr><td>${champ(c)}</td>${cell(x)}</tr>`).join('')||'<tr><td class="mut">—</td></tr>'}</table></div>`;
   const gl=[...G.values()].filter(rs=>rs.length==2);
   const ext=(f,k)=>gl.filter(rs=>f(rs)!=null).sort((a,b)=>k*(f(b)-f(a)))[0];
   const len=rs=>rs[0][TF.minutes],kills=rs=>rs[0][TF.kills]==null?null:rs[0][TF.kills]+rs[1][TF.kills];

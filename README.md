@@ -34,6 +34,10 @@ date of the latest game ("Games up to ..."), index.json "data_until".
   within a day): a past year then uses its cached copy; if the current year is refused the run fails and nothing
   changes on the site until the next run.
 
+## Images
+Champion icons: `python fetch_images.py` (from pipeline/) downloads new champions from Riot's Data Dragon into
+docs/img/champions/ (--force: all again). The daily Action runs it too.
+
 ## Data files (docs/data/, generated)
     index.json               config, years, list of game files, player and team index (search, which files each is in), Elo settings,
                              tournaments (one per league split, event and international event) and qualification links
