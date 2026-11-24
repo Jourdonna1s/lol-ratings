@@ -181,7 +181,6 @@ a.hubc:hover{text-decoration:none;border-color:var(--ac)}.hubc.soon b{color:var(
 .tip{position:absolute;top:4px;pointer-events:none;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:12px;white-space:nowrap;box-shadow:var(--shadow);z-index:3}
 .cc{position:relative}
 .cc svg{display:block;width:100%;height:auto;touch-action:pan-y;overflow:visible}
-.cc .zg{fill:var(--good);opacity:.08}.cc .zb{fill:var(--bad);opacity:.08}
 .cc .gl{stroke:var(--line);stroke-width:1}.cc .gl.one{stroke:var(--mut);stroke-dasharray:6 4;stroke-width:1.5}
 .cc .ax{fill:var(--mut);font-size:12px}.cc .ax.one{font-weight:700}
 .cc .band{fill:var(--band)}.cc .ln{fill:none;stroke:var(--ac);stroke-width:3;stroke-linejoin:round}
@@ -273,3 +272,19 @@ footer{max-width:1200px;margin:0 auto;padding:20px 24px 36px;color:var(--mut);fo
   h1.mh{font-size:34px}
   footer{padding:20px 16px 32px}
 }
+
+/* bracket: columns of series (rounds), scrolls sideways inside its card on small screens */
+.brw{overflow-x:auto;margin:8px 0 14px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}
+.br{display:flex;gap:28px;min-width:max-content}
+.bc{display:flex;flex-direction:column;width:230px}
+.bh{font-family:var(--disp);text-transform:uppercase;font-size:15px;letter-spacing:.04em;color:var(--mut);margin-bottom:10px}
+.bm{flex:1;display:flex;flex-direction:column;justify-content:space-around;gap:12px}
+.bx{display:block;background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:6px 10px;color:var(--fg);text-decoration:none;position:relative}
+.bx:hover{border-color:var(--ac)}
+.bx.fin{border-color:var(--ac);box-shadow:0 0 0 1px var(--ac) inset}
+.bc+.bc .bx::before{content:"";position:absolute;left:-29px;top:50%;width:28px;border-top:1px solid var(--line)}
+.bd{display:block;font-size:11px;color:var(--mut);margin-bottom:2px}
+.bt{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:3px 0;color:var(--mut)}
+.bt span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bt b{font-variant-numeric:tabular-nums;min-width:14px;text-align:right}
+.bt.w{color:var(--fg);font-weight:700}.bt.w b{color:var(--ac)}

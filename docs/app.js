@@ -486,7 +486,7 @@ function playerPage(p){
   const ev=g=>g[F.league]+(g[F.split]||g[F.period]?' '+esc(SPN(g[F.league],g[F.split])||g[F.period]):'')+(g[F.stage]=='playoffs'?' (playoffs)':'');
   // career rows (every year, whatever the filters) and the rating-by-year chart (when 2+ years have ratings)
   const cr=careerRows(p),chartOn=cr.filter(r=>r.o).length>1;
-  const left=(chartOn?`<div class="panel"><div class="phd"><h2>Rating by year</h2><span class="ckey"><span><i></i>overall</span><span><i class="b"></i>range</span><span class="good">● 1.15+</span><span class="avg">● between</span><span class="bad">● 0.90 or less</span></span></div>
+  const left=(chartOn?`<div class="panel"><div class="phd"><h2>Rating by year</h2><span class="ckey"><span><i></i>overall</span><span class="good">● 1.15+</span><span class="avg">● between</span><span class="bad">● 0.90 or less</span></span></div>
     <div class="cc" id="cc"></div><p class="mut sm">Overall rating per year (all leagues). Hover or tap a year for details, click it to show that year on the page.</p></div>`:'')+career(p,cr);
   const statsP=`<div class="panel"><h2>Stats</h2><div class="stats">
   ${stat('Games',n)}${stat('Win rate',(100*W/n).toFixed(0)+'%')}${stat('KDA',((K+A)/Math.max(De,1)).toFixed(2))}
@@ -522,21 +522,18 @@ function career(p,rows){
   ${rows.slice().reverse().map(({y,gs,tms,o,d,i})=>`<tr><td><button class="link sm" data-yr="${y}">${y}</button></td><td class="pl">${tms.map(t=>tlink(t,null,gs.find(g=>g[F.team]==t)[F.league])).join(', ')}</td><td>${gs.length}</td>${cell(o)}${cell(d).replace('<td','<td class="hm"')}${cell(i).replace('<td','<td class="hm"')}</tr>`).join('')}</table></div></div>
   <p class="mut sm">Every year, whatever the filters above. Each year is rated against that year’s baselines. Click a year to show it on the page.</p>`;
 }
-// rating by year: overall rating per year with its ~90% range as a band, shaded zones for 1.15+ and 0.90 or less,
-// value labels, and a tooltip (year, rating, range, games, teams, domestic and international) on hover or tap
+// rating by year: overall rating per year as a line with coloured dots (1.15+, between, 0.90 or less), value labels, and a tooltip (year, rating, range, games, teams, domestic and international) on hover or tap
 function careerChart(el,rows,pick,name){
   // drawn at the panel's own width (text keeps its size on phones)
   const R=rows.filter(r=>r.o),W=Math.max(300,Math.round(el.clientWidth||720)),H=W<520?230:280,pl=44,pr=10,pt=26,pb=36;
-  const vals=R.flatMap(r=>[r.o.lo,r.o.hi]);
+  const vals=R.map(r=>r.o.x);
   const y0=Math.max(0.4,Math.min(0.8,Math.floor(Math.min(...vals)*5)/5)),y1=Math.min(2.4,Math.max(1.4,Math.ceil(Math.max(...vals)*5)/5));
   const cl=v=>Math.max(y0,Math.min(y1,v)),Y=v=>+(pt+(H-pt-pb)*(1-(cl(v)-y0)/(y1-y0))).toFixed(1);
   const step=(W-pl-pr-30)/Math.max(1,R.length-1),X=i=>+(pl+15+i*step).toFixed(1),yl=y=>step<40?"'"+String(y).slice(2):y;
   const tk=(y1-y0)>1.2?0.4:0.2,ticks=[];for(let t=Math.ceil(y0/tk-1e-9)*tk;t<=y1+1e-9;t+=tk)ticks.push(+t.toFixed(2));if(!ticks.includes(1))ticks.push(1);
-  const band=R.map((r,i)=>X(i)+','+Y(r.o.hi)).concat(R.map((r,i)=>X(i)+','+Y(r.o.lo)).reverse()).join(' ');
   el.innerHTML=`<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${esc(name)}: overall rating by year, ${R.map(r=>r.y+' '+f2(r.o.x)).join(', ')}">
-    ${y1>1.15?`<rect class="zg" x="${pl}" width="${W-pl-pr}" y="${Y(y1)}" height="${Y(1.15)-Y(y1)}"/>`:''}${y0<0.9?`<rect class="zb" x="${pl}" width="${W-pl-pr}" y="${Y(0.9)}" height="${Y(y0)-Y(0.9)}"/>`:''}
     ${ticks.map(t=>`<line class="gl${t==1?' one':''}" x1="${pl}" x2="${W-pr}" y1="${Y(t)}" y2="${Y(t)}"/><text class="ax${t==1?' one':''}" x="${pl-8}" y="${Y(t)+4}" text-anchor="end">${t.toFixed(2)}</text>`).join('')}
-    <polygon class="band" points="${band}"/><polyline class="ln" points="${R.map((r,i)=>X(i)+','+Y(r.o.x)).join(' ')}"/>
+    <polyline class="ln" points="${R.map((r,i)=>X(i)+','+Y(r.o.x)).join(' ')}"/>
     ${R.map((r,i)=>`<g data-i="${i}"><line class="gd" x1="${X(i)}" x2="${X(i)}" y1="${pt}" y2="${H-pb}"/><circle class="dt ${rc(r.o.x)}" cx="${X(i)}" cy="${Y(r.o.x)}" r="6"/>
       <text class="vl" x="${X(i)}" y="${Y(r.o.x)-13}" text-anchor="middle">${f2(r.o.x)}</text><text class="yl" x="${X(i)}" y="${H-10}" text-anchor="middle">${yl(r.y)}</text>
       <rect class="hit" x="${X(i)-step/2}" y="0" width="${step}" height="${H}"/></g>`).join('')}</svg><div class="tip" hidden></div>`;
@@ -759,8 +756,21 @@ function tourPage(e){
   // a bracket stage without the final: its teams, marking those that went on to the next stage
   const stageTeams=g=>{const ts=[...new Set(g.rows.map(r=>r[TF.ti]))],nm={};g.rows.forEach(r=>nm[r[TF.ti]]=r[TF.team]);
     return`<div class="chips">${ts.map(ti=>{const n=nextOf(g,ti);return`<span class="chip${n?' on':''}">${tlink(nm[ti],ti)}${n?' <span class="mut sm">→ '+n.replace(/<[^>]+>/g,'').trim()+'</span>':''}</span>`}).join('')}</div>`};
+  // a bracket stage as columns of series: a series' round = 1 + the latest round either team already played in this stage
+  // (single elimination gives quarterfinals, semifinals, final; double elimination gives its rounds in order)
+  const bracket=g=>{if(g.type!='bracket'||g.ser.length<2||g.ser.length>31)return'';
+    const last={},rd=new Map();for(const x of [...g.ser].sort((a,b)=>a.date.localeCompare(b.date)||a.id-b.id)){const r=1+Math.max(last[x.a]||0,last[x.b]||0);rd.set(x,r);last[x.a]=last[x.b]=r}
+    const n=Math.max(...rd.values()),cols=[...Array(n)].map((_,i)=>g.ser.filter(x=>rd.get(x)==i+1).sort((a,b)=>a.date.localeCompare(b.date)||a.id-b.id));
+    // each earlier round in the order of the series its winner plays next (so pairs feeding one series sit together)
+    for(let i=n-2;i>=0;i--){const nx=cols[i+1],at=x=>{const w=x.wa>x.wb?x.a:x.b,j=nx.findIndex(y=>y.a==w||y.b==w);return j<0?nx.length:j};
+      cols[i]=cols[i].map((x,k)=>[x,k]).sort((p,q)=>at(p[0])-at(q[0])||p[1]-q[1]).map(p=>p[0])}
+    // names only for a clean single elimination (1, 2, 4, 8 series from the final back), else Round 1, 2, ...
+    const single=cols.every((c,i)=>c.length==2**(n-1-i))&&n<=4;
+    const nm=(c,i)=>single?['Final','Semifinals','Quarterfinals','Round of 16'][n-1-i]:'Round '+(i+1);
+    const side=(x,ti,w,won)=>`<div class="bt${won?' w':''}"><span>${esc(x.nm[ti])}</span><b>${w}</b></div>`;
+    return`<div class="brw"><div class="br">${cols.map((c,i)=>`<div class="bc"><div class="bh">${nm(c,i)}</div><div class="bm">${c.map(x=>`<a class="bx${x.id==e.final?' fin':''}" href="${mhref(e.k,x.id)||'#'+e.slug}"><span class="bd">${dm(x.date)} · ${bo(x)}</span>${side(x,x.a,x.wa,x.wa>x.wb)}${side(x,x.b,x.wb,x.wb>x.wa)}</a>`).join('')}</div></div>`).join('')}</div></div>`};
   const stageHtml=g=>`<h2>${esc(g.name)}</h2>${g.desc?`<p class="sd">${esc(g.desc)}</p>`:''}`+(!g.rows.length?`<p class="mut">Not in the data${e.done?'':' yet'}.</p>`
-    :g.type=='table'?stable(g,g.rows):g.ser.some(x=>x.id==e.final)&&(e.places||[]).length?placeTable(g):stageTeams(g));
+    :g.type=='table'?stable(g,g.rows):bracket(g)+(g.ser.some(x=>x.id==e.final)&&(e.places||[]).length?placeTable(g):stageTeams(g)));
   // the stage with the final: each team's place, and the tournament it qualified for with its place (or stage reached) there
   const PL=new Map((e.places||[]).map(([ti,p],i)=>[ti,{p,i}]));
   const placeOf=(x,ti)=>{const f=(x.places||[]).find(([i])=>i==ti);return f?f[1]:''};
