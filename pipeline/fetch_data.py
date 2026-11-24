@@ -41,11 +41,14 @@ def _auth():
     global _token
     if _token is None:
         import requests
-        r = requests.post("https://oauth2.googleapis.com/token", timeout=60, data={
-            "client_id": os.environ["GDRIVE_CLIENT_ID"], "client_secret": os.environ["GDRIVE_CLIENT_SECRET"],
-            "refresh_token": os.environ["GDRIVE_REFRESH_TOKEN"], "grant_type": "refresh_token"})
+        env = {k: os.environ[k].strip() for k in ("GDRIVE_CLIENT_ID", "GDRIVE_CLIENT_SECRET", "GDRIVE_REFRESH_TOKEN")}
+        r = requests.post("https://oauth2.googleapis.com/token", timeout=60, data={   # spaces/new lines pasted with them
+            "client_id": env["GDRIVE_CLIENT_ID"], "client_secret": env["GDRIVE_CLIENT_SECRET"],
+            "refresh_token": env["GDRIVE_REFRESH_TOKEN"], "grant_type": "refresh_token"})
         if r.status_code != 200:
-            sys.exit(f"Google sign-in failed ({r.status_code}): {r.text[:300]} (new refresh token: drive_auth.py)")
+            cid = env["GDRIVE_CLIENT_ID"]
+            sys.exit(f"Google sign-in failed ({r.status_code}): {r.text[:300]} (client id: {len(cid)} characters, "
+                     f"ends with {cid[-27:]!r}; new refresh token: drive_auth.py)")
         _token = r.json()["access_token"]
     return {"Authorization": f"Bearer {_token}"}
 
