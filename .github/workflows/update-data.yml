@@ -41,8 +41,14 @@ jobs:
           key: oe-none
           restore-keys: oe-
 
+      # signed in to Google Drive (secrets from pipeline/drive_auth.py): anonymous downloads of these popular files
+      # are refused by Drive's download limit
       - name: Download Oracle's Elixir files
         working-directory: pipeline
+        env:
+          GDRIVE_CLIENT_ID: ${{ secrets.GDRIVE_CLIENT_ID }}
+          GDRIVE_CLIENT_SECRET: ${{ secrets.GDRIVE_CLIENT_SECRET }}
+          GDRIVE_REFRESH_TOKEN: ${{ secrets.GDRIVE_REFRESH_TOKEN }}
         run: python fetch_data.py --cache ../oe_cache
 
       - name: Save past years' files
