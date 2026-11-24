@@ -23,7 +23,8 @@ const norm=s=>s.normalize('NFD').replace(/[\u0300-\u036f]/g,'');
 const slugify=s=>norm(s).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const f2=x=>x==null||isNaN(x)?'—':x.toFixed(2);
-const rc=x=>x>=1.15?'good':x<=0.9?'bad':'';
+// rating colour: green 1.15+, red 0.90 or less, grey between
+const rc=x=>x==null||isNaN(x)?'':x>=1.15?'good':x<=0.9?'bad':'avg';
 const INTL='INTL',NAME=l=>(C.names||{})[l]||l,LN=L=>L=='all'?'All leagues':L=='major'?'Major leagues':L==INTL?'International':NAME(L);
 const COMB=L=>L=='all'||L=='major';   // the boards that combine leagues
 // tier of a league: Major / Tier 1 / Tier 2 / Tier 3 / Event, shown as a small tag
@@ -302,14 +303,17 @@ function filters(el,lgs,L,setL,redraw,roles,rows){
   const sl=splits(L),on=st.split!='all'||st.stage!='all'||yv()!=YDEF()||(roles&&st.role!='all');
   const note=COMB(L)?regions(st.split):L!=INTL&&rname(L,st.split)?L+' '+rname(L,st.split):'';
   const opt=(items,cur)=>items.map(([k,l,t])=>`<option value="${esc(k)}"${k==cur?' selected':''}${t?` title="${esc(t)}"`:''}>${esc(l)}</option>`).join('');
-  const sel=(id,label,items,cur)=>`<select id="${id}" aria-label="${label}" class="${cur!='all'&&id!='f-lg'?'on':''}">${opt(items,cur)}</select>`;
+  const fl=(label,inner,cls)=>`<label class="fl${cls?' '+cls:''}"><span>${label}</span>${inner}</label>`;
+  const sel=(id,label,items,cur)=>fl(label,`<select id="${id}" class="${cur!='all'&&id!='f-lg'?'on':''}">${opt(items,cur)}</select>`);
+  // role: one button per role (All, Top, Jungle, Mid, Bot, Support)
+  const RS={all:'All',top:'Top',jng:'Jng',mid:'Mid',bot:'Bot',sup:'Sup'};
   el.innerHTML=`<div class="fbar">
-  <select id="f-lg" aria-label="League">${groups(lgs).map(([t,ls])=>`<optgroup label="${t}">${opt(ls.map(l=>[l,LN(l)]),L)}</optgroup>`).join('')}</select>
+  ${fl('League',`<select id="f-lg">${groups(lgs).map(([t,ls])=>`<optgroup label="${t}">${opt(ls.map(l=>[l,LN(l)]),L)}</optgroup>`).join('')}</select>`)}
   ${sl.length?sel('f-sp',L==INTL?'Event':'Split',[['all',L==INTL?'All events':'All splits'],...sl.map(s=>{const r=L==INTL?'':rname(L,s);return[s,s,COMB(L)?regions(s):r?`${L} calls it ${r}`:'']})],st.split):''}
   ${sel('f-st','Stage',[['all','All stages'],['regular','Regular season'],['playoffs','Playoffs']],st.stage)}
   ${sel('f-yr','Year',[['all','All years'],...av.slice().reverse().map(y=>[y,y])],yv())}
-  ${roles?sel('f-rl','Role',[['all','All roles'],...Object.entries(RL)],st.role):''}
-  ${on?'<button class="link" id="f-reset">Reset</button>':''}</div>
+  ${roles?`<div class="fl seg-fl"><span>Role</span><div class="seg" role="group" aria-label="Role">${Object.entries(RS).map(([k,l])=>`<button type="button" data-rl="${k}" class="${st.role==k?'on':''}" aria-pressed="${st.role==k}" title="${k=='all'?'All roles':RL[k]}">${l}</button>`).join('')}</div></div>`:''}
+  ${on?'<button class="link" id="f-reset">Reset filters</button>':''}</div>
   ${sl.length&&st.split!='all'&&(note||tourFor(L))?`<div class="mut sm fnote">${note?`${esc(st.split)} = ${esc(note)}`:''}${note&&tourFor(L)?' · ':''}${tourFor(L)?`<a href="#${tourFor(L).slug}">${esc(tourFor(L).short)} ${tourFor(L).year}: standings and results →</a>`:''}</div>`:''}`;
   const ch=(id,f)=>{const s=el.querySelector('#'+id);if(s)s.onchange=()=>{f(s.value);st.all=st.tall=0;redraw()}};
   // a league without data in the chosen year: its latest year instead
@@ -318,7 +322,8 @@ function filters(el,lgs,L,setL,redraw,roles,rows){
     setL(k);st.split='all';st[YK]=y;st.all=st.tall=0;redraw()};
   ch('f-sp',k=>st.split=k);ch('f-st',k=>st.stage=k);const yh=el.querySelector('#f-yr');if(yh)yh.onchange=async()=>{const k=yh.value;
     if(YK=='year'){yh.disabled=true;try{await ensureYears(yearsFor(k))}catch(e){yh.disabled=false;return}}
-    st[YK]=k;if(!splits(L).includes(st.split))st.split='all';st.all=st.tall=0;redraw()};ch('f-rl',k=>st.role=k);
+    st[YK]=k;if(!splits(L).includes(st.split))st.split='all';st.all=st.tall=0;redraw()};
+  el.querySelectorAll('[data-rl]').forEach(b=>b.onclick=()=>{st.role=b.dataset.rl;st.all=st.tall=0;redraw()});
   const r=el.querySelector('#f-reset');if(r)r.onclick=()=>{st.split=st.stage='all';st[YK]=fitYear(YDEF(),av);if(roles)st.role='all';st.all=st.tall=0;redraw()};
 }
 // the tournament behind a single-league board with one split chosen (the latest one in the chosen year)
@@ -328,12 +333,26 @@ const tourFor=L=>{if(st.split=='all'||COMB(L))return null;
 const boardLeagues=()=>{const rest=LEAGUES.filter(l=>TIER[l]!='major').sort((a,b)=>NAME(a).localeCompare(NAME(b)));
   return ['major','all',...MAJ,...rest,...EVENTS,...(HAS_INTL?[INTL]:[])]};
 
-// header on every page: site name, menu, search (players and teams)
+// header on every page (the sticky bar above #app): site name, menu, search (players, teams, tournaments) and the
+// theme switch (dark by default; the choice is kept on the device). Returns '' so pages can still write header(x)+html.
+const theme=()=>document.documentElement.getAttribute('data-theme')=='light'?'light':'dark';
 function header(cur){
-  return `<header class="top"><div><a class="brand" href="#home">Pro Player Ratings<small>v${esc(D.version||'0.1')}</small></a>
-  <nav class="menu">${[['home','Home'],['players','Players'],['teams','Teams'],['events','Tournaments']].map(([k,l])=>`<a href="#${k}"${k==cur?' class="on" aria-current="page"':''}>${l}</a>`).join('')}</nav></div>
-  <div class="srch"><input id="q" type="search" placeholder="Search a player, team or tournament…" autocomplete="off"><div id="res"></div></div></header>`;
+  // (an index.html from before this header has no #top: add it)
+  let el=document.getElementById('top');if(!el){el=document.createElement('header');el.className='top';el.id='top';app.before(el)}
+  const other=theme()=='light'?'dark':'light';
+  el.innerHTML=`<div class="hin"><a class="brand" href="#home">Pro Player <b>Ratings</b><small>v${esc(D.version||'0.1')}</small></a>
+  <nav class="menu" aria-label="Main">${[['home','Home'],['players','Players'],['teams','Teams'],['events','Tournaments']].map(([k,l])=>`<a href="#${k}"${k==cur?' class="on" aria-current="page"':''}>${l}</a>`).join('')}</nav>
+  <div class="hr"><div class="srch"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="q" type="search" placeholder="Search a player, team or tournament" aria-label="Search a player, team or tournament" autocomplete="off"><div id="res"></div></div>
+  <button type="button" class="thm" id="thm" aria-label="Switch to the ${other} theme">${other=='light'?'Light':'Dark'}</button></div></div>`;
+  document.getElementById('thm').onclick=()=>{const t=theme()=='light'?'dark':'light';document.documentElement.setAttribute('data-theme',t);
+    try{localStorage.setItem('theme',t)}catch(e){}header(cur);wireSearch()};
+  return '';
 }
+// breadcrumbs: [[href, label], ...], the last one is the current page. A crumb can carry leaderboard filters
+// (data-lg, data-role, data-yr), set when it is clicked (see the click handler at the end)
+const crumbs=items=>`<nav class="crumbs" aria-label="Breadcrumb">${items.map(([h,l,at],i)=>i==items.length-1?`<span aria-current="page">${l}</span>`
+  :`<a href="${h}"${at||''}>${l}</a><span class="sep" aria-hidden="true">›</span>`).join('')}</nav>`;
+const boardCrumb=(L,role,y)=>` data-lg="${esc(L)}"${role?` data-role="${role}"`:''}${y&&y!='all'?` data-yr="${y}"`:''}`;
 function wireSearch(){
   const q=document.getElementById('q'),res=document.getElementById('res');
   q.oninput=()=>{
@@ -347,28 +366,47 @@ function wireSearch(){
 
 // main page: menu and a short preview of both leaderboards
 function home(){
-  const pb=unfiltered(()=>board('major')).rows.slice(0,5),top=sortTeams(unfiltered(()=>teamBoard('major')),'elo').slice(0,5);
-  app.innerHTML=header('home')+`
-  <p class="mut lead">Performance ratings for pro players from per-game stats, and team strength from results, for ${LEAGUES.length} leagues, ${EVENTS.length} events and the international tournaments. A player rating of 1.00 is an average performance in the games counted, not a measure of skill.</p>
-  <div class="hub">
-    <a class="card hubc" href="#players"><b>Player leaderboards</b><span class="mut sm">Ratings by league, split, stage and role</span></a>
-    <a class="card hubc" href="#teams"><b>Team leaderboards</b><span class="mut sm">Elo strength, records and series by league</span></a>
-    <a class="card hubc" href="#events"><b>Tournaments</b><span class="mut sm">Standings, results, champions and qualification paths</span></a>
-  </div>
+  const pb=unfiltered(()=>board('major')).rows.slice(0,8),top=sortTeams(unfiltered(()=>teamBoard('major')),'elo').slice(0,8);
+  // tournaments of the major leagues and international events: still being played, and the latest champions
+  const big=e=>e.kind=='international'||e.tier=='major',newest=(a,b)=>b.last.localeCompare(a.last);
+  const live=TOURS.filter(e=>big(e)&&!e.done&&String(e.year)==LAST_YEAR).sort(newest).slice(0,3);
+  const won=TOURS.filter(e=>big(e)&&e.champ!=null&&teams[e.champ]).sort(newest).slice(0,8);
+  const until=D.data_until?new Date(D.data_until+'T12:00:00Z').toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric',timeZone:'UTC'}):'';
+  const emax=Math.max(...top.map(a=>a.elo)),emin=Math.min(...top.map(a=>a.elo))-100;
+  const k=n=>n>=10000?(n/1000).toFixed(1).replace(/\.0$/,'')+'k':n.toLocaleString('en-GB');
+  header('home');
+  app.innerHTML=`<section class="hero">
+    <div class="card">${live.length?`<div class="pills">${live.map(e=>`<a class="pill" href="#${e.slug}">${esc(e.short)} ${e.year} · in progress</a>`).join('')}</div>`:''}
+      <h1>Who performed best,<br>game by game</h1>
+      <p class="mut lead">Performance ratings for pro players from per-game stats, and team strength from results, for ${LEAGUES.length} leagues, ${EVENTS.length} events and the international tournaments, ${YEARS[0]}–${LAST_YEAR}. A player rating of 1.00 is an average performance in the games counted, not a measure of skill.${until?` Games up to ${until}.`:''}</p>
+      <div class="btns"><a class="btn pri" href="#players">Player leaderboards</a><a class="btn" href="#teams">Team leaderboards</a><a class="btn" href="#events">Tournaments</a></div></div>
+    <div class="card hstats">${[[k(list.length),'Players'],[k(teams.length),'Teams'],[k(TOURS.length),'Tournaments'],[YEARS.length,'Seasons']].map(([v,l])=>`<div><b>${v}</b><span>${l}</span></div>`).join('')}</div>
+  </section>
   <div class="prev">
-    <div><h2>Top players · Major leagues ${LAST_YEAR}</h2><div class="tw"><table class="lbt">${pb.map((x,i)=>`<tr><td>${i+1}</td><td class="pl"><a href="#${x.p.slug}">${esc(x.p.name)}</a><div class="mut sub">${tlink(x.team,x.ti)} · ${RL[x.p.role]}</div></td><td class="${rc(x.r.x)}"><b class="rt">${f2(x.r.x)}</b></td></tr>`).join('')}</table></div>
-      <p><a href="#players">All player leaderboards →</a></p></div>
-    <div><h2>Top teams · Major leagues ${LAST_YEAR}</h2><div class="tw"><table class="lbt">${top.map((a,i)=>`<tr><td>${i+1}</td><td class="pl"><a href="#${a.t.slug}">${esc(a.t.name)}</a><div class="mut sub">${esc(a.t.league)}${tag(a.t.league)}</div></td><td><b class="rt">${Math.round(a.elo)}</b><div class="mut sm">${a.wins}-${a.games-a.wins}</div></td></tr>`).join('')}</table></div>
-      <p><a href="#teams">All team leaderboards →</a></p></div>
+    <div class="panel"><div class="phd"><h2>Top players</h2><a href="#players">All players →</a></div>
+      <div class="tw"><table class="lbt">${pb.map((x,i)=>`<tr><td class="rk">${i+1}</td><td class="pl"><a href="#${x.p.slug}">${esc(x.p.name)}</a><div class="mut sub">${tlink(x.team,x.ti)} · ${RL[x.p.role]}</div></td><td class="${rc(x.r.x)}" style="text-align:right"><b class="rt">${f2(x.r.x)}</b></td></tr>`).join('')}</table></div>
+      <p class="mut sm">Major leagues ${LAST_YEAR}.</p></div>
+    <div class="panel"><div class="phd"><h2>Team Elo now</h2><a href="#teams">All teams →</a></div>
+      <div class="tw"><table class="lbt">${top.map((a,i)=>`<tr><td class="rk">${i+1}</td><td class="pl"><a href="#${a.t.slug}">${esc(a.t.name)}</a><div class="mut sub">${esc(a.t.league)}${tag(a.t.league)} · ${a.wins}-${a.games-a.wins}</div></td><td class="hm" style="width:30%"><span class="ebar"><i style="width:${Math.round(100*(a.elo-emin)/Math.max(1,emax-emin))}%"></i></span></td><td style="text-align:right"><b class="rt">${Math.round(a.elo)}</b></td></tr>`).join('')}</table></div>
+      <p class="mut sm">Major leagues ${LAST_YEAR}.</p></div>
+    <div class="panel"><div class="phd"><h2>Latest champions</h2><a href="#events">All tournaments →</a></div>
+      <div class="tw"><table class="lbt">${won.map(e=>`<tr><td class="mut sm">${dm(e.last)}</td><td class="pl"><a href="#${e.slug}">${esc(e.short)}</a> <span class="mut sm">${e.year}</span></td><td style="text-align:right"><span class="champ">${tlink(teams[e.champ].name,e.champ)}</span></td></tr>`).join('')}</table></div>
+      <p class="mut sm">Major leagues and international events.</p></div>
   </div>
   <p class="mut sm">${esc(ELO_NOTE)}</p>`;
   wireSearch();
 }
+// leaderboard pages: filters in a side panel, the board on the right; the title names the selection
+const boardShell=(cur,what)=>{header(cur);app.innerHTML=crumbs([['#home','Home'],[null,what]])+`<div class="board"><aside class="side" aria-label="Filters"><div id="fb"></div><p class="key" id="key"></p></aside>
+  <section><div class="bhead"><h1 class="pt" id="bt">${what}</h1><p class="mut sm" id="bd"></p></div><div class="tw" id="lb"></div><div id="mb"></div>
+  <p class="mut sm" id="fn"></p><p class="mut sm" id="lg"></p></section></div>`;wireSearch()};
+const boardTitle=(L,role)=>`${esc(LN(L))}${yv()!='all'?' '+yv():''}${role&&role!='all'?` <b style="color:var(--ac)">${{top:'Top laners',jng:'Junglers',mid:'Mid laners',bot:'Bot laners',sup:'Supports'}[role]}</b>`:''}`;
+// bar from the 1.00 average: right (green/grey) above it, left below; full width at ±0.40
+const vbar=x=>{const w=Math.min(50,Math.abs(x-1)/0.4*50).toFixed(1);return`<span class="vbar ${rc(x)}"><i style="${x>=1?'left':'right'}:50%;width:${w}%"></i></span>`};
 function playersPage(){
-  app.innerHTML=header('players')+`<h2 class="pt">Player leaderboards</h2>
-  <div id="fb"></div><div class="tw" id="lb"></div><div id="mb"></div>
-  <p class="mut sm" id="fn"></p><p class="mut sm">${esc(legend())}</p>`;
-  wireSearch();
+  boardShell('players','Player leaderboards');
+  document.getElementById('key').innerHTML=`<span class="good"><b>1.15+</b></span> well above the average · <span class="bad"><b>0.90 or less</b></span> well below · 1.00 = the average of the games counted`;
+  document.getElementById('lg').textContent=legend();
   draw();
 }
 function draw(){
@@ -376,9 +414,11 @@ function draw(){
   const b=board(st.lg);
   let rows=b.rows.filter(x=>st.role=='all'||x.p.role==st.role);
   const tot=rows.length;if(!st.all)rows=rows.slice(0,20);
-  document.getElementById('lb').innerHTML=`<table class="lbt"><tr><th>#</th><th>Player</th><th>Games</th><th>Rating</th></tr>`+
-    (rows.length?rows.map((x,i)=>`<tr><td>${i+1}</td><td class="pl"><a href="#${x.p.slug}">${esc(x.p.name)}</a><div class="mut sub">${tlink(x.team,x.ti)} · ${RL[x.p.role]}${COMB(st.lg)?` · ${esc(x.lg)}${tag(x.lg,yv()=='all'?null:yv())}`:''}</div></td><td>${x.r.n}</td><td class="${rc(x.r.x)}"><b class="rt">${f2(x.r.x)}</b> <span class="mut sm rng">${f2(x.r.lo)}–${f2(x.r.hi)}</span></td></tr>`).join('')
-    :`<tr><td colspan="4" class="mut">No players for these filters.</td></tr>`)+`</table>`;
+  document.getElementById('bt').innerHTML=boardTitle(st.lg,st.role);
+  document.getElementById('bd').textContent=`Player leaderboard · ${tot} players · performance relative to the games counted, not skill`;
+  document.getElementById('lb').innerHTML=`<table class="lbt"><tr><th>#</th><th>Player</th><th>Games</th><th class="hm" style="text-align:center">vs average (1.00)</th><th>Rating</th></tr>`+
+    (rows.length?rows.map((x,i)=>`<tr><td class="rk">${i+1}</td><td class="pl"><a href="#${x.p.slug}">${esc(x.p.name)}</a><div class="mut sub">${tlink(x.team,x.ti)} · ${RL[x.p.role]}${COMB(st.lg)?` · ${esc(x.lg)}${tag(x.lg,yv()=='all'?null:yv())}`:''}</div></td><td>${x.r.n}</td><td class="hm vb">${vbar(x.r.x)}</td><td class="${rc(x.r.x)}"><b class="rt">${f2(x.r.x)}</b> <span class="mut sm rng">${f2(x.r.lo)}–${f2(x.r.hi)}</span></td></tr>`).join('')
+    :`<tr><td colspan="5" class="mut">No players for these filters.</td></tr>`)+`</table>`;
   const mb=document.getElementById('mb');
   mb.innerHTML=tot>20&&!st.all?`<button class="more" id="more">Show all ${tot}</button>`:'';
   if(mb.firstChild)document.getElementById('more').onclick=()=>{st.all=1;draw()};
@@ -386,20 +426,20 @@ function draw(){
 }
 
 function teamsPage(){
-  app.innerHTML=header('teams')+`<h2 class="pt">Team leaderboards</h2>
-  <div id="fb"></div><div class="tw" id="lb"></div><div id="mb"></div>
-  <p class="mut sm" id="fn"></p>`;
-  wireSearch();
+  boardShell('teams','Team leaderboards');
+  document.getElementById('key').textContent='Elo: team strength from results. Click a column heading to sort.';
   drawTeams();
 }
 function drawTeams(){
   filters(document.getElementById('fb'),boardLeagues(),st.lg,k=>st.lg=k,drawTeams,0);
   let rows=sortTeams(teamBoard(st.lg));
   const tot=rows.length;if(!st.tall)rows=rows.slice(0,20);
+  document.getElementById('bt').innerHTML=boardTitle(st.lg)+' <b style="color:var(--ac)">Teams</b>';
+  document.getElementById('bd').textContent=`Team leaderboard · ${tot} teams`;
   const th=(k,l,cls)=>`<th class="${cls||''}"><button class="sort${st.tsort==k?' on':''}" data-k="${k}">${l}${st.tsort==k?' ↓':''}</button></th>`;
   const gd=a=>a.gdn?Math.round(a.gds/a.gdn):'—';
   document.getElementById('lb').innerHTML=`<table class="lbt tbt"><tr><th>#</th><th>Team</th>${th('elo','Elo')}<th>Record</th><th class="hm">Series</th>${th('win','Win %')}${th('gd','GD@15','hm')}</tr>`+
-    (rows.length?rows.map((a,i)=>`<tr><td>${i+1}</td><td class="pl"><a href="#${a.t.slug}">${esc(a.t.name)}</a>${COMB(st.lg)?`<div class="mut sub">${esc(a.t.league)}${tag(a.t.league)}</div>`:''}</td><td><b class="rt">${Math.round(a.elo)}</b></td><td>${a.wins}-${a.games-a.wins}</td><td class="hm">${a.sw}-${a.sl}</td><td>${Math.round(100*a.wins/a.games)}%</td><td class="hm">${gd(a)}</td></tr>`).join('')
+    (rows.length?rows.map((a,i)=>`<tr><td class="rk">${i+1}</td><td class="pl"><a href="#${a.t.slug}">${esc(a.t.name)}</a>${COMB(st.lg)?`<div class="mut sub">${esc(a.t.league)}${tag(a.t.league)}</div>`:''}</td><td><b class="rt">${Math.round(a.elo)}</b></td><td>${a.wins}-${a.games-a.wins}</td><td class="hm">${a.sw}-${a.sl}</td><td>${Math.round(100*a.wins/a.games)}%</td><td class="hm">${gd(a)}</td></tr>`).join('')
     :`<tr><td colspan="7" class="mut">No teams for these filters.</td></tr>`)+`</table>`;
   document.querySelectorAll('button.sort').forEach(b=>b.onclick=()=>{st.tsort=b.dataset.k;drawTeams()});
   const mb=document.getElementById('mb');
@@ -413,12 +453,16 @@ function playerPage(p){
   if(st.plg!='all'&&!ls.includes(st.plg))st.plg='all';
   st.pyear=fitYear(st.pyear,rowYears(p.games,st.plg));
   const gs=p.games.filter(g=>keep(g,st.plg)),dom=gs.filter(g=>g[F.kind]=='domestic'),intl=gs.filter(g=>g[F.kind]=='international'),n=gs.length;
-  const head=header('players')+`<a href="#players">← Player leaderboards</a>
-  <h1 style="margin-top:8px">${esc(p.name)}</h1>
-  <div class="mut">${RL[p.role]} · ${tlink(p.team,null,p.league)} · ${esc(p.league)}${tag(p.league)}${(o=>o.length?' · '+esc(o.join(', ')):'')([...new Set(p.games.map(g=>g[F.league]))].filter(l=>l!=p.league))}</div>`;
+  header('players');
+  const py=st.pyear!='all'?st.pyear:st.pdef;
+  const top=`${crumbs([['#home','Home'],['#players','Players'],['#players',`${esc(p.league)} · ${RL[p.role]}`,boardCrumb(p.league,p.role,py)],[null,esc(p.name)]])}
+  <section class="phead"><div class="ptop"><div><div class="tags"><span class="tag role">${RL[p.role]}</span><span class="tag plain">${esc(p.league)}${TT(p.league)?' · '+TT(p.league):''}</span></div>
+  <h1>${esc(p.name)}</h1>
+  <div class="mut">${tlink(p.team,null,p.league)} · ${esc(p.league)}${(o=>o.length?' · also '+esc(o.join(', ')):'')([...new Set(p.games.map(g=>g[F.league]))].filter(l=>l!=p.league))}</div></div>
+  <div id="fb"></div></div>`;
   const redraw=()=>{st.pg=0;playerPage(p)},bar=()=>filters(document.getElementById('fb'),['all',...ls],st.plg,k=>st.plg=k,redraw,0,p.games);
   if(!n){
-    app.innerHTML=head+`<div id="fb" style="margin-top:14px"></div><p class="mut">No games for this player in the selected filters. Change or reset the filters above.</p>`;
+    app.innerHTML=top+`<p class="mut pnote">No games for this player in the selected filters. Change or reset the filters above.</p></section>`;
     bar();wireSearch();return;
   }
   const o=rate(gs,F.r_overall),d=dom.length?rate(dom,F.r_overall):null,i=intl.length?rate(intl,F.r_overall):null;
@@ -426,58 +470,105 @@ function playerPage(p){
   const sum=k=>gs.reduce((a,g)=>a+(g[F[k]]||0),0),gd=gs.filter(g=>g[F.gd15]!=null);
   const K=sum('kills'),De=sum('deaths'),A=sum('assists'),W=sum('result');
   const card=(t,r,big)=>r?`<div class="card ${big?'main':''}"><div class="mut sm">${t}</div><div class="${big?'num':'num2'} ${rc(r.x)}">${f2(r.x)}</div><div class="mut sm">${f2(r.lo)}–${f2(r.hi)} · ${r.n} games</div></div>`:'';
-  const stat=(l,v)=>`<div class="card"><div class="mut sm">${l}</div><div class="st">${v}</div></div>`;
+  const stat=(l,v)=>`<div><span>${l}</span><b>${v}</b></div>`;
+  const av=k=>{const x=gs.map(g=>g[F[k]]).filter(v=>v!=null);return x.length?x.reduce((a,b)=>a+b,0)/x.length:null};
   const ch={};
-  gs.forEach(g=>{const c=ch[g[F.champion]]=ch[g[F.champion]]||{n:0,w:0,k:0,d:0,a:0};c.n++;c.w+=g[F.result];c.k+=g[F.kills];c.d+=g[F.deaths];c.a+=g[F.assists]});
+  gs.forEach(g=>{const c=ch[g[F.champion]]=ch[g[F.champion]]||{n:0,w:0,k:0,d:0,a:0,gs:[]};c.n++;c.w+=g[F.result];c.k+=g[F.kills];c.d+=g[F.deaths];c.a+=g[F.assists];c.gs.push(g)});
   const champs=Object.entries(ch).sort((a,b)=>b[1].n-a[1].n).slice(0,8);
   const rec=gs.slice().reverse(),shown=st.pg?rec:rec.slice(0,20);
   const ev=g=>g[F.league]+(g[F.split]||g[F.period]?' '+esc(SPN(g[F.league],g[F.split])||g[F.period]):'')+(g[F.stage]=='playoffs'?' (playoffs)':'');
-  app.innerHTML=head+`
-  <div id="fb" style="margin-top:14px"></div>
-  <div class="cards">${card('Overall rating · '+esc(selection(st.plg)),o,1)}${card('Domestic',d)}${card('International',i)}</div>
-  <p class="mut sm">Ranges are a ~90% interval. Overall counts international games ${C.intl_weight}×${p.games.some(g=>g[F.kind]=='event')?', events and qualifiers 1× (they are not in the International rating)':''}. Early game ${f2(e&&e.x)} · Late game ${f2(l&&l.x)}.</p>
-  ${career(p)}
-  ${cabinet(AWP[p.i]||[])}
-  <h2>Stats</h2><div class="cards">
+  // career rows (every year, whatever the filters) and the rating-by-year chart (when 2+ years have ratings)
+  const cr=careerRows(p),chartOn=cr.filter(r=>r.o).length>1;
+  const left=(chartOn?`<div class="panel"><div class="phd"><h2>Rating by year</h2><span class="ckey"><span><i></i>overall</span><span><i class="b"></i>range</span><span class="good">● 1.15+</span><span class="avg">● between</span><span class="bad">● 0.90 or less</span></span></div>
+    <div class="cc" id="cc"></div><p class="mut sm">Overall rating per year (all leagues). Hover or tap a year for details, click it to show that year on the page.</p></div>`:'')+career(p,cr);
+  const statsP=`<div class="panel"><h2>Stats</h2><div class="stats">
   ${stat('Games',n)}${stat('Win rate',(100*W/n).toFixed(0)+'%')}${stat('KDA',((K+A)/Math.max(De,1)).toFixed(2))}
   ${stat('K / D / A per game',(K/n).toFixed(1)+' / '+(De/n).toFixed(1)+' / '+(A/n).toFixed(1))}
-  ${stat('Gold diff @15',gd.length?Math.round(gd.reduce((a,g)=>a+g[F.gd15],0)/gd.length):'—')}</div>
-  <h2>Champions</h2><div class="tw"><table><tr><th>Champion</th><th>Games</th><th>Win rate</th><th>KDA</th></tr>
-  ${champs.map(([c,v])=>`<tr><td>${champ(c)}</td><td>${v.n}</td><td>${(100*v.w/v.n).toFixed(0)}%</td><td>${((v.k+v.a)/Math.max(v.d,1)).toFixed(2)}</td></tr>`).join('')}</table></div>
+  ${stat('Gold diff @15',gd.length?Math.round(gd.reduce((a,g)=>a+g[F.gd15],0)/gd.length):'—')}
+  ${av('dpm')!=null?stat('Damage per min',Math.round(av('dpm'))):''}${av('cs')!=null?stat('CS per game',Math.round(av('cs'))):''}${av('vspm')!=null?stat('Vision per min',av('vspm').toFixed(2)):''}</div></div>`;
+  const champP=`<div class="panel"><h2>Champions</h2><div class="tw"><table class="lbt"><tr><th>Champion</th><th>Games</th><th>Win rate</th><th>KDA</th><th>Rating</th></tr>
+  ${champs.map(([c,v])=>{const r=rate(v.gs,F.r_overall);return`<tr><td>${champ(c)}</td><td>${v.n}</td><td>${(100*v.w/v.n).toFixed(0)}%</td><td>${((v.k+v.a)/Math.max(v.d,1)).toFixed(2)}</td><td class="${r?rc(r.x):'mut'}"><b>${r?f2(r.x):'—'}</b></td></tr>`}).join('')}</table></div></div>`;
+  app.innerHTML=top+`
+  <div class="cards">${card('Overall rating · '+esc(selection(st.plg)),o,1)}${card('Domestic',d)}${card('International',i)}${card('Early game',e)}${card('Late game',l)}</div>
+  <p class="mut sm pnote">Ranges are a ~90% interval. Overall counts international games ${C.intl_weight}×${p.games.some(g=>g[F.kind]=='event')?', events and qualifiers 1× (they are not in the International rating)':''}. Performance ratings relative to the games counted, not skill.</p></section>
+  <div class="cols">${left?`<div>${left}</div><div>${statsP}${champP}</div>`:`<div>${champP}</div><div>${statsP}</div>`}</div>
+  ${cabinet(AWP[p.i]||[])}
   <h2>Games</h2><div class="tw"><table><tr><th>Date</th><th>Rating</th><th></th><th>vs</th><th>Champion</th><th>K/D/A</th><th>GD@15</th><th>Event</th></tr>
-  ${shown.map(g=>`<tr><td>${mlink(phref(p,g),g[F.date])}</td><td class="${rc(g[F.r_overall])}"><b>${f2(g[F.r_overall])}</b></td><td class="${g[F.result]?'good':'bad'}">${g[F.result]?'W':'L'}</td><td>${g[F.opponent]?tlink(g[F.opponent],null,g[F.league]):'—'}</td><td>${champ(g[F.champion])}</td><td>${g[F.kills]}/${g[F.deaths]}/${g[F.assists]}</td><td>${g[F.gd15]==null?'—':Math.round(g[F.gd15])}</td><td>${elink(g,ev(g))}</td></tr>`).join('')}</table></div>
+  ${shown.map(g=>`<tr><td>${mlink(phref(p,g),g[F.date])}</td><td class="${rc(g[F.r_overall])}"><b>${f2(g[F.r_overall])}</b></td><td><span class="res ${g[F.result]?'good':'bad'}">${g[F.result]?'W':'L'}</span></td><td>${g[F.opponent]?tlink(g[F.opponent],null,g[F.league]):'—'}</td><td>${champ(g[F.champion])}</td><td>${g[F.kills]}/${g[F.deaths]}/${g[F.assists]}</td><td class="${g[F.gd15]==null?'':g[F.gd15]>=0?'good':'bad'}">${g[F.gd15]==null?'—':Math.round(g[F.gd15])}</td><td>${elink(g,ev(g))}</td></tr>`).join('')}</table></div>
   ${!st.pg&&rec.length>20?`<button class="more" id="mg">Show all ${rec.length}</button>`:''}`;
-  bar();wireSearch();
+  bar();wireSearch();wireCab();
+  if(chartOn)careerChart(document.getElementById('cc'),cr,y=>{st.pyear=y;redraw()},p.name);
   const mg=document.getElementById('mg');if(mg)mg.onclick=()=>{st.pg=1;playerPage(p)};
   document.querySelectorAll('[data-yr]').forEach(b=>b.onclick=()=>{st.pyear=b.dataset.yr;redraw()});
 }
 
-// career: one row per year (all leagues and stages), when the player has games in more than one year
-function career(p){
-  const ys=[...new Set(p.games.map(yr))];if(ys.length<2)return '';
+// career: one row per year (all leagues and stages, whatever the filters): teams, overall, domestic and international
+function careerRows(p){
+  return [...new Set(p.games.map(yr))].map(y=>{const gs=p.games.filter(g=>yr(g)==y),dom=gs.filter(g=>g[F.kind]=='domestic'),intl=gs.filter(g=>g[F.kind]=='international');
+    return{y,gs,tms:[...new Set(gs.map(g=>g[F.team]))],o:rate(gs,F.r_overall),d:dom.length?rate(dom,F.r_overall):null,i:intl.length?rate(intl,F.r_overall):null}});
+}
+// the career table, when the player has games in more than one year
+function career(p,rows){
+  if(rows.length<2)return '';
   const cell=r=>r?`<td class="${rc(r.x)}"><b>${f2(r.x)}</b> <span class="mut sm rng">${f2(r.lo)}–${f2(r.hi)}</span></td>`:'<td class="mut">—</td>';
-  return `<h2>Career</h2><div class="tw"><table class="lbt tbt"><tr><th>Year</th><th>Team</th><th>Games</th><th>Overall</th><th class="hm">Domestic</th><th class="hm">International</th></tr>
-  ${ys.reverse().map(y=>{const gs=p.games.filter(g=>yr(g)==y),dom=gs.filter(g=>g[F.kind]=='domestic'),intl=gs.filter(g=>g[F.kind]=='international');
-    const tms=[...new Set(gs.map(g=>g[F.team]))];
-    return `<tr><td><button class="link sm" data-yr="${y}">${y}</button></td><td class="pl">${tms.map(t=>tlink(t,null,gs.find(g=>g[F.team]==t)[F.league])).join(', ')}</td><td>${gs.length}</td>${cell(rate(gs,F.r_overall))}${cell(dom.length?rate(dom,F.r_overall):null).replace('<td','<td class="hm"')}${cell(intl.length?rate(intl,F.r_overall):null).replace('<td','<td class="hm"')}</tr>`}).join('')}</table></div>
+  return `<div class="panel"><h2>Career</h2><div class="tw"><table class="lbt tbt"><tr><th>Year</th><th>Team</th><th>Games</th><th>Overall</th><th class="hm">Domestic</th><th class="hm">International</th></tr>
+  ${rows.slice().reverse().map(({y,gs,tms,o,d,i})=>`<tr><td><button class="link sm" data-yr="${y}">${y}</button></td><td class="pl">${tms.map(t=>tlink(t,null,gs.find(g=>g[F.team]==t)[F.league])).join(', ')}</td><td>${gs.length}</td>${cell(o)}${cell(d).replace('<td','<td class="hm"')}${cell(i).replace('<td','<td class="hm"')}</tr>`).join('')}</table></div></div>
   <p class="mut sm">Every year, whatever the filters above. Each year is rated against that year’s baselines. Click a year to show it on the page.</p>`;
 }
-
-// trophy cabinet of a player (mine) or a team (mine: the team's results, mates: its players' awards by rating);
-// every year, whatever the filters
-function cabinet(mine,mates){
-  const what=a=>a.tour!=null?`<a href="#${TOURS[a.tour].slug}">${esc(TOURS[a.tour].short)} ${TOURS[a.tour].year}</a>`:`${esc(NAME(a.league))} ${a.year}`;
-  const res=k=>mine.filter(a=>a.kind==k),rated=mine.filter(a=>!RESULT.has(a.kind)&&!OFF(a)),off=mine.filter(OFF);
-  const pl=a=>`<a href="#${list[a.pi].slug}">${esc(list[a.pi].name)}</a>`;
-  const sec=(t,xs,f)=>xs.length?`<div class="card cab"><div class="mut sm">${t}</div><div class="num2">${xs.length}</div><ul class="aw">${xs.map(f).join('')}</ul></div>`:'';
-  const res1=a=>`<li>${what(a)}${a.detail=='roster'?' <span class="mut sm">(sub)</span>':''}</li>`;
-  const aw1=(a,who)=>`<li><b>${AWNAME(a)}</b>${who?' · '+who:''} · ${what(a)} <span class="mut sm">${f2(a.rating)} in ${a.games} games</span></li>`;
-  const off1=(a,who)=>`<li><b>${esc(a.detail)}</b>${who?' · '+who:''} · ${what(a)}</li>`;
-  const html=sec('Titles',res('champion'),res1)+sec('Runner-up',res('runner_up'),res1)+sec('Official awards',off,a=>off1(a))
-    +sec('Players’ official awards',(mates||[]).filter(OFF),a=>off1(a,pl(a)))
-    +sec('Awards by rating',rated,a=>aw1(a))+sec('Players’ awards by rating',(mates||[]).filter(a=>!OFF(a)),a=>aw1(a,pl(a)));
-  return html?`<h2>Trophy cabinet</h2><div class="cards">${html}</div><p class="mut sm">All years. A title counts for every player who played for the team in that tournament (sub: did not play the final). ${OFF_NOTE} ${AW_NOTE}</p>`:'';
+// rating by year: overall rating per year with its ~90% range as a band, shaded zones for 1.15+ and 0.90 or less,
+// value labels, and a tooltip (year, rating, range, games, teams, domestic and international) on hover or tap
+function careerChart(el,rows,pick,name){
+  // drawn at the panel's own width (text keeps its size on phones)
+  const R=rows.filter(r=>r.o),W=Math.max(300,Math.round(el.clientWidth||720)),H=W<520?230:280,pl=44,pr=10,pt=26,pb=36;
+  const vals=R.flatMap(r=>[r.o.lo,r.o.hi]);
+  const y0=Math.max(0.4,Math.min(0.8,Math.floor(Math.min(...vals)*5)/5)),y1=Math.min(2.4,Math.max(1.4,Math.ceil(Math.max(...vals)*5)/5));
+  const cl=v=>Math.max(y0,Math.min(y1,v)),Y=v=>+(pt+(H-pt-pb)*(1-(cl(v)-y0)/(y1-y0))).toFixed(1);
+  const step=(W-pl-pr-30)/Math.max(1,R.length-1),X=i=>+(pl+15+i*step).toFixed(1),yl=y=>step<40?"'"+String(y).slice(2):y;
+  const tk=(y1-y0)>1.2?0.4:0.2,ticks=[];for(let t=Math.ceil(y0/tk-1e-9)*tk;t<=y1+1e-9;t+=tk)ticks.push(+t.toFixed(2));if(!ticks.includes(1))ticks.push(1);
+  const band=R.map((r,i)=>X(i)+','+Y(r.o.hi)).concat(R.map((r,i)=>X(i)+','+Y(r.o.lo)).reverse()).join(' ');
+  el.innerHTML=`<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${esc(name)}: overall rating by year, ${R.map(r=>r.y+' '+f2(r.o.x)).join(', ')}">
+    ${y1>1.15?`<rect class="zg" x="${pl}" width="${W-pl-pr}" y="${Y(y1)}" height="${Y(1.15)-Y(y1)}"/>`:''}${y0<0.9?`<rect class="zb" x="${pl}" width="${W-pl-pr}" y="${Y(0.9)}" height="${Y(y0)-Y(0.9)}"/>`:''}
+    ${ticks.map(t=>`<line class="gl${t==1?' one':''}" x1="${pl}" x2="${W-pr}" y1="${Y(t)}" y2="${Y(t)}"/><text class="ax${t==1?' one':''}" x="${pl-8}" y="${Y(t)+4}" text-anchor="end">${t.toFixed(2)}</text>`).join('')}
+    <polygon class="band" points="${band}"/><polyline class="ln" points="${R.map((r,i)=>X(i)+','+Y(r.o.x)).join(' ')}"/>
+    ${R.map((r,i)=>`<g data-i="${i}"><line class="gd" x1="${X(i)}" x2="${X(i)}" y1="${pt}" y2="${H-pb}"/><circle class="dt ${rc(r.o.x)}" cx="${X(i)}" cy="${Y(r.o.x)}" r="6"/>
+      <text class="vl" x="${X(i)}" y="${Y(r.o.x)-13}" text-anchor="middle">${f2(r.o.x)}</text><text class="yl" x="${X(i)}" y="${H-10}" text-anchor="middle">${yl(r.y)}</text>
+      <rect class="hit" x="${X(i)-step/2}" y="0" width="${step}" height="${H}"/></g>`).join('')}</svg><div class="tip" hidden></div>`;
+  const svg=el.querySelector('svg'),tip=el.querySelector('.tip'),gs=[...svg.querySelectorAll('g[data-i]')];
+  let cur=-1,skip=false;
+  const show=i=>{if(cur==i)return;cur=i;gs.forEach((g,j)=>g.classList.toggle('hv',j==i));const r=R[i];
+    tip.innerHTML=`<div class="th"><b class="big">${r.y}</b><b class="big ${rc(r.o.x)}">${f2(r.o.x)}</b></div><div class="mut">range ${f2(r.o.lo)}–${f2(r.o.hi)} · ${r.gs.length} games</div><div class="mut">${esc(r.tms.join(', '))}</div><div class="mut">domestic ${f2(r.d&&r.d.x)} · international ${f2(r.i&&r.i.x)}</div>`;
+    tip.hidden=false;tip.style.left=Math.max(14,Math.min(86,100*X(i)/W))+'%';tip.style.top=(100*Y(r.o.x)/H)+'%'};
+  const hide=()=>{cur=-1;tip.hidden=true;gs.forEach(g=>g.classList.remove('hv'))};
+  gs.forEach((g,i)=>{const h=g.querySelector('.hit');
+    h.addEventListener('pointerenter',e=>{if(e.pointerType=='mouse')show(i)});
+    h.addEventListener('pointerdown',e=>{if(e.pointerType!='mouse'&&cur!=i)skip=true;show(i)});
+    h.addEventListener('click',()=>{if(skip){skip=false;return}pick(R[i].y)})});
+  svg.addEventListener('pointerleave',e=>{if(e.pointerType=='mouse')hide()});
 }
+
+// trophy cabinet of a player (mine) or a team (mine: the team's results; mates: its players' official awards):
+// titles, runner-up finishes and official awards, every year whatever the filters, as a timeline with a filter by kind.
+// Our awards by rating (Tournament MVP, Finals MVP, Player of the Year) are not in the cabinet; tournament pages show them.
+function cabinet(mine,mates){
+  const nm=a=>a.tour!=null?`<a href="#${TOURS[a.tour].slug}">${esc(TOURS[a.tour].short)}</a>`:esc(NAME(a.league));
+  const pl=a=>`<a href="#${list[a.pi].slug}">${esc(list[a.pi].name)}</a>`;
+  const KD=a=>a.kind=='champion'?'title':a.kind=='runner_up'?'runner':'official',KO={title:0,runner:1,official:2};
+  const xs=[...mine.filter(a=>RESULT.has(a.kind)||OFF(a)).map(a=>({a})),...(mates||[]).filter(OFF).map(a=>({a,who:1}))];
+  if(!xs.length)return '';
+  xs.forEach(x=>x.k=KD(x.a));xs.sort((p,q)=>q.a.year-p.a.year||KO[p.k]-KO[q.k]||q.a.when.localeCompare(p.a.when));
+  const LB={title:'Title',runner:'Runner-up',official:'Official'},n=k=>xs.filter(x=>x.k==k).length;
+  const item=({a,k,who})=>`<li class="it ${k}" data-k="${k}"><span class="itag">${LB[k]}</span>`+(k=='official'?`<b>${esc(a.detail)}</b>${who?' · '+pl(a):''} <span class="mut sm">${nm(a)}</span>`
+    :`<b>${nm(a)}</b>${a.detail=='roster'?' <span class="mut sm">(sub)</span>':''}`)+'</li>';
+  const fs=[['all','All',xs.length],['title','Titles',n('title')],['runner','Runner-up',n('runner')],['official','Official awards',n('official')]].filter(([k,,c])=>k=='all'||c);
+  return `<section class="cabw" id="cab"><div class="cabh"><h2>Trophy cabinet</h2><div class="cabf" role="group" aria-label="Show">${fs.map(([k,l,c],i)=>`<button type="button" data-cf="${k}" class="${i?'':'on'}" aria-pressed="${!i}">${l}<span>${c}</span></button>`).join('')}</div></div>
+  ${[...new Set(xs.map(x=>x.a.year))].map(y=>`<div class="cy"><b>${y}</b><ul>${xs.filter(x=>x.a.year==y).map(item).join('')}</ul></div>`).join('')}
+  <p class="mut sm">All years, whatever the filters above. A title counts for every player who played for the team in that tournament (sub: did not play the final). ${OFF_NOTE}</p></section>`;
+}
+function wireCab(){const w=document.querySelector('.cabw');if(!w)return;
+  w.querySelectorAll('[data-cf]').forEach(b=>b.onclick=()=>{const k=b.dataset.cf;
+    w.querySelectorAll('[data-cf]').forEach(x=>{x.classList.toggle('on',x==b);x.setAttribute('aria-pressed',x==b)});
+    w.querySelectorAll('.it').forEach(it=>it.hidden=k!='all'&&it.dataset.k!=k);
+    w.querySelectorAll('.cy').forEach(c=>c.hidden=![...c.querySelectorAll('.it')].some(it=>!it.hidden))})}
 
 // Elo over the selected games: one 2px line, hairline grid, crosshair + tooltip snapping to the nearest game
 function eloChart(el,gs){
@@ -514,13 +605,17 @@ function teamPage(t){
   const latest=sortTeams(unfiltered(()=>teamBoard('all')),'elo'),mates=latest.filter(a=>a.t.league==t.league);
   const rank={lg:mates.findIndex(a=>a.t==t)+1,of:mates.length,all:latest.findIndex(a=>a.t==t)+1,ofAll:latest.length};
   const last=t.rows[t.rows.length-1];
-  const head=header('teams')+`<a href="#teams">← Team leaderboards</a>
-  <h1 style="margin-top:8px">${esc(t.name)}</h1>
-  <div class="mut">${esc(NAME(t.league))}${tag(t.league)}${others.length?' · '+esc(others.join(', ')):''} · Elo now ${Math.round(NOW[t.i]??last.r[TF.elo_after])} · ${rank.lg?`#${rank.lg} of ${rank.of} in ${esc(t.league)} · #${rank.all} of ${rank.ofAll} teams`:`not ranked (no games in the latest ${esc(t.league)} split${LATEST[t.league]?', '+esc(LATEST[t.league].p):''})`}</div>
-  ${(AWT[t.i]||[]).some(a=>a.kind=='champion')?`<div class="sm" style="margin-top:4px"><b>Titles:</b> ${AWT[t.i].filter(a=>a.kind=='champion').length} · <a href="#cab">trophy cabinet ↓</a></div>`:''}`;
+  header('teams');
+  const ty=st.pyear!='all'?st.pyear:st.pdef;
+  const head=`${crumbs([['#home','Home'],['#teams','Teams'],['#teams',esc(t.league),boardCrumb(t.league,null,ty)],[null,esc(t.name)]])}
+  <section class="phead"><div class="ptop"><div><div class="tags"><span class="tag role">Team</span><span class="tag plain">${esc(t.league)}${TT(t.league)?' · '+TT(t.league):''}</span></div>
+  <h1>${esc(t.name)}</h1>
+  <div class="mut">${esc(NAME(t.league))}${others.length?' · also '+esc(others.join(', ')):''} · Elo now <b style="color:var(--fg)">${Math.round(NOW[t.i]??last.r[TF.elo_after])}</b> · ${rank.lg?`#${rank.lg} of ${rank.of} in ${esc(t.league)} · #${rank.all} of ${rank.ofAll} teams`:`not ranked (no games in the latest ${esc(t.league)} split${LATEST[t.league]?', '+esc(LATEST[t.league].p):''})`}</div>
+  ${(AWT[t.i]||[]).some(a=>a.kind=='champion')?`<div class="sm" style="margin-top:4px"><b>Titles:</b> ${AWT[t.i].filter(a=>a.kind=='champion').length} · <a href="#cab">trophy cabinet ↓</a></div>`:''}</div>
+  <div id="fb"></div></div>`;
   const redraw=()=>{st.tpg=0;teamPage(t)},bar=()=>filters(document.getElementById('fb'),['all',...ls],st.tlg,k=>st.tlg=k,redraw,0,t.rows);
   if(!n){
-    app.innerHTML=head+`<div id="fb" style="margin-top:14px"></div><p class="mut">No games for this team in the selected filters. Change or reset the filters above.</p>`;
+    app.innerHTML=head+`<p class="mut pnote">No games for this team in the selected filters. Change or reset the filters above.</p></section>`;
     bar();wireSearch();return;
   }
   const W=gs.filter(g=>R(g)[TF.result]).length,ser=gs.map(R).filter(r=>r[TF.s_result]!=null),sw=ser.filter(r=>r[TF.s_result]==1).length;
@@ -575,11 +670,10 @@ function teamPage(t){
   const ev=r=>r[TF.league]+(r[TF.split]||r[TF.period]?' '+esc(SPN(r[TF.league],r[TF.split])||r[TF.period]):'')+(r[TF.stage]=='playoffs'?' (playoffs)':'');
   const card=(l,v,s,big)=>`<div class="card ${big?'main':''}"><div class="mut sm">${l}</div><div class="${big?'num':'num2 nw'}">${v}</div><div class="mut sm">${s}</div></div>`;
   app.innerHTML=head+`
-  <div id="fb" style="margin-top:14px"></div>
-  <div class="cards">${card('Elo after last game · '+esc(selection(st.tlg)),Math.round(e1),`${dE>=0?'+':''}${Math.round(dE)} over ${n} games`,1)}
+  <div class="cards">${card('Elo after last game · '+esc(selection(st.tlg)),Math.round(e1),`<span class="${dE>=0?'good':'bad'}">${dE>=0?'+':''}${Math.round(dE)}</span> over ${n} games`,1)}
     ${card('Record',`${W}-${n-W}`,`${Math.round(100*W/n)}% of games`)}${card('Series',`${sw}-${ser.length-sw}`,'Bo1, Bo3 or Bo5 against one opponent')}
-    ${card('Win % blue / red',`${sb.pct} / ${sr.pct}`,`${sb.rec} · ${sr.rec}`)}</div>
-  <div id="cab">${cabinet(AWT[t.i]||[])}</div>
+    ${card('Win % blue / red',`${sb.pct} / ${sr.pct}`,`${sb.rec} · ${sr.rec}`)}</div></section>
+  ${cabinet(AWT[t.i]||[])}
   <h2>Roster</h2>${yv()=='all'?`<div class="tw"><table><tr><th>Player</th><th>Role</th><th>Years</th><th>Games</th><th>Rating</th></tr>
   ${allRows.map(yrow).join('')||'<tr><td colspan="5" class="mut">No rated player games.</td></tr>'}</table></div>
   <p class="mut sm">Everyone who played for the team in the selection, with the years they played for it. Player performance ratings in this team’s games (not a measure of skill).</p>`:`<div class="tw"><table><tr><th>Starting lineup</th><th>Role</th><th>Games</th><th>Rating</th></tr>
@@ -594,9 +688,9 @@ function teamPage(t){
   <p class="mut sm">Per game. Rank among the ${nT} teams in ${esc(selection(CL))}. @15 stats only from games with full stats.</p>
   <h2>Draft</h2><div class="draft">${dl('Most picked · win %',picks,1)}${dl('Most banned by them',bans)}${dl('Most banned against them',bansVs)}</div>
   <h2>Games</h2><div class="tw"><table><tr><th>Date</th><th></th><th>vs</th><th>Side</th><th>Length</th><th>K-D</th><th>GD@15</th><th>Drg / Bar / Tow</th><th>Elo</th><th>Event</th></tr>
-  ${shown.map(g=>{const r=g.r,dx=r[TF.elo_after]-r[TF.elo_before];return`<tr><td>${mlink(mhref(fileKey(r[TF.date],r[TF.league]),r[TF.series]),r[TF.date])}</td><td class="${r[TF.result]?'good':'bad'}">${r[TF.result]?'W':'L'}</td><td>${tlink(r[TF.opponent],r[TF.oi])}</td><td>${r[TF.side]}</td><td>${r[TF.minutes]==null?'—':r[TF.minutes].toFixed(1)}</td><td>${r[TF.kills]??'—'}-${r[TF.deaths]??'—'}</td><td>${r[TF.gd15]==null?'—':Math.round(r[TF.gd15])}</td><td>${r[TF.dragons]??'—'} / ${r[TF.barons]??'—'} / ${r[TF.towers]??'—'}</td><td>${Math.round(r[TF.elo_after])}${Math.round(dx)?` <span class="${dx>0?'good':'bad'} sm">${dx>0?'+':''}${Math.round(dx)}</span>`:''}</td><td>${elink(g,ev(r))}${fin.has(g)?` · <b>title</b> <span class="mut sm">(+${fin.get(g)} included)</span>`:''}</td></tr>`}).join('')}</table></div>
+  ${shown.map(g=>{const r=g.r,dx=r[TF.elo_after]-r[TF.elo_before];return`<tr><td>${mlink(mhref(fileKey(r[TF.date],r[TF.league]),r[TF.series]),r[TF.date])}</td><td><span class="res ${r[TF.result]?'good':'bad'}">${r[TF.result]?'W':'L'}</span></td><td>${tlink(r[TF.opponent],r[TF.oi])}</td><td>${r[TF.side]}</td><td>${r[TF.minutes]==null?'—':r[TF.minutes].toFixed(1)}</td><td>${r[TF.kills]??'—'}-${r[TF.deaths]??'—'}</td><td>${r[TF.gd15]==null?'—':Math.round(r[TF.gd15])}</td><td>${r[TF.dragons]??'—'} / ${r[TF.barons]??'—'} / ${r[TF.towers]??'—'}</td><td>${Math.round(r[TF.elo_after])}${Math.round(dx)?` <span class="${dx>0?'good':'bad'} sm">${dx>0?'+':''}${Math.round(dx)}</span>`:''}</td><td>${elink(g,ev(r))}${fin.has(g)?` · <b>title</b> <span class="mut sm">(+${fin.get(g)} included)</span>`:''}</td></tr>`}).join('')}</table></div>
   ${!st.tpg&&rec.length>20?`<button class="more" id="mg">Show all ${rec.length}</button>`:''}`;
-  bar();wireSearch();
+  bar();wireSearch();wireCab();
   eloChart(document.getElementById('elo'),gs);
   const mg=document.getElementById('mg');if(mg)mg.onclick=()=>{st.tpg=1;teamPage(t)};
 }
@@ -612,9 +706,10 @@ function eventsPage(){
   const sel=TOURS.filter(e=>st.eyr=='all'||String(e.year)==st.eyr).sort((a,b)=>b.last.localeCompare(a.last)||b.first.localeCompare(a.first));
   const gs=EG.map(([l,f])=>[l,sel.filter(f)]).filter(([l,x])=>x.length&&(st.eg=='all'||st.eg==l));
   const opt=(items,cur)=>items.map(([k,l])=>`<option value="${esc(k)}"${k==cur?' selected':''}>${esc(l)}</option>`).join('');
-  app.innerHTML=header('events')+`<h2 class="pt">Tournaments</h2>
-  <div class="fbar"><select id="f-eg" aria-label="Group" class="${st.eg!='all'?'on':''}">${opt([['all','All tournaments'],...EG.map(([l])=>[l,l])],st.eg)}</select>
-  <select id="f-ey" aria-label="Year" class="${st.eyr!='all'?'on':''}">${opt([['all','All years'],...ys.map(y=>[y,y])],st.eyr)}</select></div>
+  header('events');
+  app.innerHTML=crumbs([['#home','Home'],[null,'Tournaments']])+`<div class="bhead"><h1 class="pt">Tournaments</h1><p class="mut sm">League splits, events and international events, with standings, results, champions and qualification paths</p></div>
+  <div class="fbar"><label class="fl"><span>Group</span><select id="f-eg" class="${st.eg!='all'?'on':''}">${opt([['all','All tournaments'],...EG.map(([l])=>[l,l])],st.eg)}</select></label>
+  <label class="fl"><span>Year</span><select id="f-ey" class="${st.eyr!='all'?'on':''}">${opt([['all','All years'],...ys.map(y=>[y,y])],st.eyr)}</select></label></div>
   ${gs.map(([l,x])=>`<h2>${l}</h2><div class="tw"><table class="lbt evt"><tr><th>Tournament</th><th>Dates</th><th class="hm">Teams</th><th>Champion</th></tr>
     ${x.map(e=>`<tr><td class="pl"><a href="#${e.slug}">${esc(e.name)}</a>${ys.length>1?` <span class="mut sm">${e.year}</span>`:''}</td><td>${dates(e)}</td><td class="hm">${e.teams}</td><td class="pl">${champOf(e)}</td></tr>`).join('')}</table></div>`).join('')||'<p class="mut">No tournaments for these filters.</p>'}
   <p class="mut sm">A tournament is a league split, an event or an international event. League games without a split name in the data are in no tournament. Champion: the winner of the last playoff series (the last series if there are no playoffs) when it was a best of 5; otherwise —.</p>`;
@@ -704,15 +799,16 @@ function tourPage(e){
   const per=e.rows[0]?e.rows[0][F.period]:null;
   const BL=e.kind=='international'?INTL:e.league,SP=e.kind=='international'?e.league:per??'all',canBoard=boardLeagues().includes(BL);
   const kind=e.kind=='international'?'International event':e.kind=='event'?'Event':esc(NAME(e.league))+(/promotion/i.test(e.split||'')?' promotion tournament':' split');
-  app.innerHTML=header('events')+`<a href="#events">← Tournaments</a>
-  <h1 style="margin-top:8px">${esc(e.name)} ${e.year}</h1>
+  header('events');
+  app.innerHTML=crumbs([['#home','Home'],['#events','Tournaments'],[null,`${esc(e.name)} ${e.year}`]])+`<section class="phead"><div class="tags"><span class="tag role">${e.kind=='international'?'International':e.kind=='event'?'Event':'League'}</span>${e.kind=='domestic'&&TTAG[e.tier]?`<span class="tag plain">${TTAG[e.tier]}</span>`:''}${e.done?'':'<span class="tag">In progress</span>'}</div>
+  <h1>${esc(e.name)} ${e.year}</h1>
   <div class="mut">${kind}${e.kind=='domestic'?etag(e):''} · ${dates(e)} · ${e.teams} teams${canBoard?` · <button class="link sm" data-go="players">Player leaderboard</button><button class="link sm" data-go="teams">Team leaderboard</button>`:''}</div>
   <div class="cards"><div class="card main"><div class="mut sm">Champion</div><div class="num2">${champOf(e)}</div><div class="mut sm">${e.runner!=null&&teams[e.runner]?'Runner-up '+tlink(teams[e.runner].name,e.runner):e.done?'No best-of-5 final in the data':'Still being played in the data'}</div></div>
     ${Object.entries((AWE[e.i]||[]).filter(OFF).reduce((o,a)=>((o[a.detail]=o[a.detail]||[]).push(a),o),{})).map(([lab,xs])=>`<div class="card"><div class="mut sm">${esc(lab)} <span title="${esc(OFF_NOTE)}">(official)</span></div><div class="${xs.length>1?'':'num2'}">${xs.map(a=>`<a href="#${list[a.pi].slug}">${esc(list[a.pi].name)}</a>`).join(', ')}</div>${xs.length==1?`<div class="mut sm">${tlink(teams[xs[0].ti]?teams[xs[0].ti].name:'',xs[0].ti)}</div>`:''}</div>`).join('')}
     ${(AWE[e.i]||[]).filter(a=>!OFF(a)).map(a=>`<div class="card"><div class="mut sm">${AWNAME(a)} <span title="${esc(AW_NOTE)}">(by rating)</span></div><div class="num2"><a href="#${list[a.pi].slug}">${esc(list[a.pi].name)}</a></div><div class="mut sm">${f2(a.rating)} in ${a.games} games · ${tlink(teams[a.ti]?teams[a.ti].name:'',a.ti)}</div></div>`).join('')}
     <div class="card"><div class="mut sm">Games</div><div class="num2">${N}</div><div class="mut sm">${series.length} series</div></div>
     <div class="card"><div class="mut sm">Blue side wins</div><div class="num2">${blue.length?Math.round(100*bw/blue.length)+'%':'—'}</div><div class="mut sm">${bw}-${blue.length-bw}</div></div>
-    <div class="card"><div class="mut sm">Average game</div><div class="num2">${lmean.length?(lmean.reduce((a,b)=>a+b,0)/lmean.length).toFixed(1):'—'}</div><div class="mut sm">minutes</div></div></div>
+    <div class="card"><div class="mut sm">Average game</div><div class="num2">${lmean.length?(lmean.reduce((a,b)=>a+b,0)/lmean.length).toFixed(1):'—'}</div><div class="mut sm">minutes</div></div></div></section>
   ${stages.map(stageHtml).join('')}
   ${qualified}
   ${stages.some(g=>g.type=='table')?'<p class="mut sm">Tables: sorted by series won, then game difference; Elo ± is the change over the whole tournament (with title bonus and decay).</p>':''}
@@ -747,8 +843,9 @@ function matchPage(s,pf){
   const roleOrd=Object.keys(RL);
   const pl=pi=>list[pi]?`<a href="#${list[pi].slug}">${esc(list[pi].name)}</a>`:'?';
 
-  const head=header('events')+(e?`<a href="#${e.slug}">← ${esc(e.name)} ${e.year}</a>`:'<a href="#events">← Tournaments</a>')+`
-  <h1 class="mh" style="margin-top:8px"><span class="${win==B?'lost':''}">${tlink(nm[A],A)}</span> <span class="sc">${w[A]}–${w[B]}</span> <span class="${win==A?'lost':''}">${tlink(nm[B],B)}</span></h1>
+  header('events');
+  const head=crumbs([['#home','Home'],['#events','Tournaments'],...(e?[[`#${e.slug}`,`${esc(e.name)} ${e.year}`]]:[]),[null,`${esc(nm[A])} vs ${esc(nm[B])}`]])+`<section class="phead">
+  <h1 class="mh"><span class="${win==B?'lost':''}">${tlink(nm[A],A)}</span> <span class="sc">${w[A]}–${w[B]}</span> <span class="${win==A?'lost':''}">${tlink(nm[B],B)}</span></h1>
   <div class="mut">${e?`<a href="#${e.slug}">${esc(e.name)} ${e.year}</a>`:esc(NAME(r0[TF.league]))}${stg?' · '+esc(stg.name):r0[TF.stage]=='playoffs'?' · Playoffs':''}${e&&e.final==s.id?' <span class="tag">Final</span>':''} · ${bo} · ${dm(d0)}${d1!=d0?' – '+dm(d1):''} ${d0.slice(0,4)}</div>`;
   const elo=ti=>{const rs=R.filter(r=>r[TF.ti]==ti),a=rs[0][TF.elo_before],b=rs[rs.length-1][TF.elo_after],d=Math.round(b-a);
     return`<div class="card"><div class="mut sm">Elo · ${esc(nm[ti])}</div><div class="num2">${Math.round(b)}</div><div class="mut sm">${Math.round(a)} before · <span class="${d>0?'good':d<0?'bad':''}">${d>0?'+':''}${d}</span></div></div>`};
@@ -795,7 +892,7 @@ function matchPage(s,pf){
       ${a&&b?`<div class="tw"><table class="mct"><tr><th></th><th>${tlink(nm[A],A)}</th><th>${tlink(nm[B],B)}</th></tr>${cmp.map(([l,f])=>`<tr><td class="mut">${l}</td><td>${f(a)}</td><td>${f(b)}</td></tr>`).join('')}</table></div>
       <h2>Draft</h2><div class="draft">${draft(a)}${draft(b)}</div>`:'<p class="mut">Team stats for this game are not in the data.</p>'}`+players;
   }
-  app.innerHTML=head+filter+cards+body;
+  app.innerHTML=head+`<div style="margin-top:16px">${filter}</div>`+cards+'</section>'+body;
   wireSearch();
   // the chosen game goes into the address (#m-.../g2), without a new history entry
   const keep=f=>{const y=scrollY;f();history.replaceState(null,'','#'+s.slug+(st.mg=='all'?'':'/g'+st.mg));matchPage(s,pf);scrollTo(0,y)};
@@ -853,5 +950,8 @@ async function route(){
   else home();
   window.scrollTo(0,0);
 }
+// a breadcrumb back to a leaderboard opens it on that league (and role and year)
+document.addEventListener('click',ev=>{const a=ev.target.closest&&ev.target.closest('a[data-lg]');if(!a)return;
+  st.lg=a.dataset.lg;st.role=a.dataset.role||'all';st.split=st.stage='all';if(a.dataset.yr)st.year=a.dataset.yr;st.all=st.tall=0});
 window.addEventListener('hashchange',route);route();
 })();
