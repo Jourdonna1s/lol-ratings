@@ -1,6 +1,13 @@
 (async()=>{
 const app=document.getElementById('app');
-const getJSON=async u=>{const r=await fetch(u);if(!r.ok)throw new Error(u+' '+r.status);return r.json()};
+// index.json is checked with the server on every load (no-cache); the other data files carry ?v=<data_until>,
+// so a data update never mixes with files the browser saved from the previous build
+const getJSON=async u=>{const idx=u=='data/index.json',v=!idx&&typeof D!='undefined'&&D&&D.data_until&&u.startsWith('data/')?(u.includes('?')?'&':'?')+'v='+D.data_until:'';
+  const r=await fetch(u+v,idx?{cache:'no-cache'}:{});if(!r.ok)throw new Error(u+' '+r.status);return r.json()};
+// a tab left open: when it comes back after 30+ minutes, reload if the data was updated meanwhile
+let seenAt=Date.now();
+document.addEventListener('visibilitychange',async()=>{if(document.visibilityState!='visible'||Date.now()-seenAt<18e5)return;seenAt=Date.now();
+  try{const n=await getJSON('data/index.json');if(D&&n.data_until&&n.data_until!=D.data_until)location.reload()}catch(e){}});
 let D,SF;
 let CI=new Set();
 try{const ci=getJSON('img/champions.json').catch(()=>[]);D=await getJSON('data/index.json');SF=[await getJSON(`data/summary/${D.years[D.years.length-1]}.json`)];CI=new Set(await ci)}
