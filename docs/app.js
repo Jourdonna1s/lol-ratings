@@ -39,7 +39,7 @@ const COMB=L=>L=='all'||L=='major';   // the boards that combine leagues
 const TT=(l,y)=>({major:'Major',tier1:'Tier 1',tier2:'Tier 2',tier3:'Tier 3',event:'Event'})[y?TY(l,String(y)):TIER[l]]||'';
 const tag=(l,y)=>TT(l,y)?` <span class="tag">${TT(l,y)}</span>`:'';
 const yr=g=>g[F.date].slice(0,4),YEARS=D.years.map(String),LAST_YEAR=YEARS[YEARS.length-1];
-const st={lg:LEAGUES.includes('LEC')?'LEC':LEAGUES[0],role:'all',split:'all',stage:'all',year:LAST_YEAR,pyear:'all',plg:'all',all:0,pg:0,tsort:'elo',tall:0,tlg:'all',tpg:0,eg:'all',eyr:'all',eopen:{},estage:'all'};
+const st={lg:LEAGUES.includes('LEC')?'LEC':LEAGUES[0],role:'all',split:'all',stage:'all',year:LAST_YEAR,pyear:'all',plg:'all',all:0,pg:0,tsort:'elo',tall:0,tlg:'all',tname:'all',tpg:0,eg:'all',eyr:'all',eopen:{},estage:'all'};
 // the year filter in use: st.year on the leaderboards and main page (default: the latest year), st.pyear on player and
 // team pages (default st.pdef: the latest year the player or team played)
 let YK='year';
@@ -99,12 +99,17 @@ list.forEach(p=>{
   p.slug=s;p.n=norm(p.name).toLowerCase();
 });
 const XF={};((D.teams||{}).fields||[]).forEach((k,i)=>XF[k]=i);
-const teams=((D.teams||{}).rows||[]).map((r,i)=>({i,name:r[XF.name],league:r[XF.league],ngames:r[XF.games],files:fk(r[XF.files]),rows:null})),tseen={},byName={};
+const teams=((D.teams||{}).rows||[]).map((r,i)=>({i,name:r[XF.name],league:r[XF.league],ngames:r[XF.games],files:fk(r[XF.files]),names:XF.names!=null?r[XF.names]||null:null,rows:null})),tseen={},byName={};
 teams.forEach(t=>{
   let s='t-'+slugify(t.name);
   tseen[s]=(tseen[s]||0)+1;if(tseen[s]>1)s+='-'+tseen[s];
-  t.slug=s;t.n=norm(t.name).toLowerCase();(byName[t.name]=byName[t.name]||[]).push(t);
+  t.slug=s;t.n=norm([t.name,...(t.names||[]).map(x=>x[0])].join(' ')).toLowerCase();(byName[t.name]=byName[t.name]||[]).push(t);
 });
+// earlier names of a team (rebrands joined in the build): [name, first year, last year], in order; the name it used in
+// a year; and the old addresses (t-<old name>) that lead to the team's page
+const prevNames=t=>(t.names||[]).filter(x=>x[0]!=t.name);
+const nameIn=(t,y)=>{if(!t.names||y=='all'||y==null)return t.name;const x=t.names.filter(n=>n[1]<=+y&&+y<=n[2]);return x.length?x[x.length-1][0]:t.name};
+const OLDSLUG={};for(const t of teams)for(const[n]of prevNames(t)){const s='t-'+slugify(n);if(!tseen[s]&&!OLDSLUG[s])OLDSLUG[s]=t}
 // tournaments: a league split, an event or an international event; key = year|league|kind|split (the game-row fields).
 // League games without a split label in the data are in no tournament.
 const TRF={};((D.tournaments||{}).fields||[]).forEach((k,i)=>TRF[k]=i);
@@ -134,10 +139,10 @@ for(const a of AW)if(isW(a)){if(a.pi!=null)(WLD[a.pi]=WLD[a.pi]||[]).push(TOURS[
 const W2013={team:'SK Telecom T1',players:[['Faker','mid'],['Bengi','jng'],['Impact','top'],['Piglet','bot']]};
 const first=p=>Math.min(...p.files.map(k=>+k.slice(0,4)));
 for(const[n,r]of W2013.players){const p=list.filter(x=>x.name==n&&x.role==r).sort((a,b)=>first(a)-first(b))[0];if(p)(WLD[p.i]=WLD[p.i]||[]).push(2013)}
-for(const t of byName[W2013.team]||[])(WLDT[t.i]=WLDT[t.i]||[]).push(2013);
-// earlier names of a team (current name: [earlier names]); only Worlds winners matter here
+for(const t of teams.filter(t=>t.name==W2013.team||prevNames(t).some(x=>x[0]==W2013.team)))(WLDT[t.i]=WLDT[t.i]||[]).push(2013);
+// earlier names for data built before TEAM_MERGE (no "names" in the index)
 const REBRANDS={'T1':['SK Telecom T1'],'Gen.G':['KSV eSports','Samsung Galaxy','Samsung White']};
-const teamWorlds=t=>{const own=(WLDT[t.i]||[]).map(y=>[y,'']);
+const teamWorlds=t=>{if(t.names)return(WLDT[t.i]||[]).map(y=>{const n=y<t.names[0][1]?t.names[0][0]:nameIn(t,y);return[y,n==t.name?'':n]}).sort((a,b)=>a[0]-b[0]);const own=(WLDT[t.i]||[]).map(y=>[y,'']);
   for(const n of REBRANDS[t.name]||[])for(const x of byName[n]||[])own.push(...(WLDT[x.i]||[]).map(y=>[y,n]));return own.sort((a,b)=>a[0]-b[0])};
 const trophy=`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h10v2h3v3a5 5 0 0 1-4.6 5A5 5 0 0 1 13 15.9V19h3v2H8v-2h3v-3.1A5 5 0 0 1 8.6 13 5 5 0 0 1 4 8V5h3V3Zm0 4H6v1a3 3 0 0 0 1.2 2.4A7 7 0 0 1 7 9V7Zm10 0v2a7 7 0 0 1-.2 1.4A3 3 0 0 0 18 8V7h-1Z"/></svg>`;
 const badge=(ys,txt)=>ys.length?` <span class="wt" title="World champion ${ys.length}× (${txt})">${trophy}×${ys.length}</span>`:'';
@@ -384,7 +389,7 @@ function wireSearch(){
     const t=norm(q.value).toLowerCase().trim();
     const m=t?[...list,...teams,...TOURS].filter(p=>p.n.includes(t)).sort((a,b)=>(b.n.startsWith(t)-a.n.startsWith(t))||b.ngames-a.ngames).slice(0,8):[];
     res.innerHTML=m.map(p=>p.kind?`<a href="#${p.slug}"><span><b>${esc(p.name)} ${p.year}</b> <span class="mut sm">Tournament</span></span><span class="mut sm">${dates(p)}</span></a>`:p.role?`<a href="#${p.slug}"><span><b>${esc(p.name)}</b> <span class="mut sm">${RL[p.role]}</span></span><span class="mut sm">${esc(p.team)} · ${esc(p.league)}${tag(p.league)}</span></a>`
-      :`<a href="#${p.slug}"><span><b>${esc(p.name)}</b> <span class="mut sm">Team</span></span><span class="mut sm">${esc(NAME(p.league))}${tag(p.league)}</span></a>`).join('');
+      :`<a href="#${p.slug}"><span><b>${esc(p.name)}</b> <span class="mut sm">Team${(p.names||[]).length>1&&!norm(p.name).toLowerCase().includes(t)?' · formerly '+esc(prevNames(p).map(x=>x[0]).join(', ')):''}</span></span><span class="mut sm">${esc(NAME(p.league))}${tag(p.league)}</span></a>`).join('');
   };
   q.onkeydown=e=>{if(e.key=='Enter'){const a=res.querySelector('a');if(a)location.hash=a.getAttribute('href').slice(1)}};
 }
@@ -464,7 +469,7 @@ function drawTeams(){
   const th=(k,l,cls)=>`<th class="${cls||''}"><button class="sort${st.tsort==k?' on':''}" data-k="${k}">${l}${st.tsort==k?' ↓':''}</button></th>`;
   const gd=a=>a.gdn?Math.round(a.gds/a.gdn):'—';
   document.getElementById('lb').innerHTML=`<table class="lbt tbt"><tr><th>#</th><th>Team</th>${th('elo','Elo')}<th>Record</th><th class="hm">Series</th>${th('win','Win %')}${th('gd','GD@15','hm')}</tr>`+
-    (rows.length?rows.map((a,i)=>`<tr><td class="rk">${i+1}</td><td class="pl"><a href="#${a.t.slug}">${esc(a.t.name)}</a>${COMB(st.lg)?`<div class="mut sub">${esc(a.t.league)}${tag(a.t.league)}</div>`:''}</td><td><b class="rt">${Math.round(a.elo)}</b></td><td>${a.wins}-${a.games-a.wins}</td><td class="hm">${a.sw}-${a.sl}</td><td>${Math.round(100*a.wins/a.games)}%</td><td class="hm">${gd(a)}</td></tr>`).join('')
+    (rows.length?rows.map((a,i)=>`<tr><td class="rk">${i+1}</td><td class="pl"><a href="#${a.t.slug}">${esc(nameIn(a.t,st.year))}</a>${COMB(st.lg)?`<div class="mut sub">${esc(a.t.league)}${tag(a.t.league)}</div>`:''}</td><td><b class="rt">${Math.round(a.elo)}</b></td><td>${a.wins}-${a.games-a.wins}</td><td class="hm">${a.sw}-${a.sl}</td><td>${Math.round(100*a.wins/a.games)}%</td><td class="hm">${gd(a)}</td></tr>`).join('')
     :`<tr><td colspan="7" class="mut">No teams for these filters.</td></tr>`)+`</table>`;
   document.querySelectorAll('button.sort').forEach(b=>b.onclick=()=>{st.tsort=b.dataset.k;drawTeams()});
   const mb=document.getElementById('mb');
@@ -621,7 +626,8 @@ function teamPage(t){
   const ls=[...LEAGUES,...EVENTS,INTL].filter(l=>t.rows.some(g=>inL(g,l)));
   if(st.tlg!='all'&&!ls.includes(st.tlg))st.tlg='all';
   st.pyear=fitYear(st.pyear,rowYears(t.rows,st.tlg));
-  const gs=t.rows.filter(g=>keep(g,st.tlg)),n=gs.length,R=g=>g.r;
+  const pn=prevNames(t);if(st.tname!='all'&&!(t.names||[]).some(x=>x[0]==st.tname))st.tname='all';
+  const gs=t.rows.filter(g=>keep(g,st.tlg)&&(st.tname=='all'||g.r[TF.team]==st.tname)),n=gs.length,R=g=>g.r;
   const others=[...new Set(t.rows.map(g=>g[F.league]))].filter(l=>l!=t.league);
   // rank by each team's latest Elo, among the teams of its league and among all teams
   const latest=sortTeams(unfiltered(()=>teamBoard('all')),'elo'),mates=latest.filter(a=>a.t.league==t.league);
@@ -633,9 +639,14 @@ function teamPage(t){
   <section class="phead"><div class="ptop"><div><div class="tags"><span class="tag role">Team</span><span class="tag plain">${esc(t.league)}${TT(t.league)?' · '+TT(t.league):''}</span></div>
   <h1>${esc(t.name)}${wbt(t)}</h1>
   <div class="mut">${esc(NAME(t.league))}${others.length?' · also '+esc(others.join(', ')):''} · Elo now <b style="color:var(--fg)">${Math.round(NOW[t.i]??last.r[TF.elo_after])}</b> · ${rank.lg?`#${rank.lg} of ${rank.of} in ${esc(t.league)} · #${rank.all} of ${rank.ofAll} teams`:`not ranked (no games in the latest ${esc(t.league)} split${LATEST[t.league]?', '+esc(LATEST[t.league].p):''})`}</div>
+  ${pn.length?`<div class="sm mut" style="margin-top:4px">Previously ${pn.map(([nm,a,b])=>`<button class="link sm" data-tn="${esc(nm)}">${esc(nm)}</button> (${a==b?a:a+'–'+b})`).join(', ')}</div>`:''}
   ${(AWT[t.i]||[]).some(a=>a.kind=='champion')?`<div class="sm" style="margin-top:4px"><b>Titles:</b> ${AWT[t.i].filter(a=>a.kind=='champion').length} · <a href="#cab">trophy cabinet ↓</a></div>`:''}</div>
-  <div id="fb"></div></div>`;
-  const redraw=()=>{st.tpg=0;teamPage(t)},bar=()=>filters(document.getElementById('fb'),['all',...ls],st.tlg,k=>st.tlg=k,redraw,0,t.rows);
+</div>
+  <div class="tfw">${t.names?`<label class="fl tnf"><span>Name</span><select id="f-tn" class="${st.tname!='all'?'on':''}">${[['all','All names'],...t.names.map(([nm,a,b])=>[nm,`${nm} (${a==b?a:a+'–'+b})`])].map(([k,l])=>`<option value="${esc(k)}"${st.tname==k?' selected':''}>${esc(l)}</option>`).join('')}</select></label>`:''}<div id="fb"></div></div></div>`;
+  const redraw=()=>{st.tpg=0;teamPage(t)},bar=()=>{filters(document.getElementById('fb'),['all',...ls],st.tlg,k=>st.tlg=k,redraw,0,t.rows);
+    // a name: its games in every year (the year filter goes to all years)
+    const pickName=v=>{st.tname=v;if(v!='all')st.pyear='all';redraw()},sel=document.getElementById('f-tn');
+    if(sel)sel.onchange=()=>pickName(sel.value);app.querySelectorAll('[data-tn]').forEach(b=>b.onclick=()=>pickName(b.dataset.tn))};
   if(!n){
     app.innerHTML=head+`<p class="mut pnote">No games for this team in the selected filters. Change or reset the filters above.</p></section>`;
     bar();wireSearch();return;
@@ -944,7 +955,7 @@ async function route(){
   // that split's year); set once the games are loaded
   YK=h.startsWith('p-')||h.startsWith('t-')?'pyear':'year';
   const pyear=gs=>{st.pdef=gs.length?yr(gs[gs.length-1]):LAST_YEAR;st.pyear=st.split!='all'?st.year:st.pdef};
-  const p=h.startsWith('p-')&&list.find(x=>x.slug==h),t=h.startsWith('t-')&&teams.find(x=>x.slug==h),e=h.startsWith('e-')&&TOURS.find(x=>x.slug==h);
+  const p=h.startsWith('p-')&&list.find(x=>x.slug==h),t=h.startsWith('t-')&&(teams.find(x=>x.slug==h)||OLDSLUG[h]),e=h.startsWith('e-')&&TOURS.find(x=>x.slug==h);
   const load=async(x,f)=>{if(Array.isArray(x.games)||x.rows)return true;app.innerHTML='<p class="mut">Loading…</p>';
     try{await f(x)}catch(e){if(my==nav)app.innerHTML='<p>Could not load this page’s games. <a href="#home">Back to the main page</a></p>';return false}
     return my==nav};
@@ -958,7 +969,8 @@ async function route(){
     try{await ensureYears(YEARS.filter(y=>+y>=y0))}catch(err){app.innerHTML='<p>Could not load this page. <a href="#home">Back to the main page</a></p>';return}
     if(my!=nav)return;
     if(!await load(t,teamGames))return;
-    pyear(t.rows);st.tlg=st.split!='all'&&t.rows.some(g=>inL(g,st.lg))?st.lg:'all';teamPage(t);
+    if(t.slug!=h)history.replaceState(null,'','#'+t.slug);
+    pyear(t.rows);st.tlg=st.split!='all'&&t.rows.some(g=>inL(g,st.lg))?st.lg:'all';st.tname='all';teamPage(t);
   }else if(e){
     if(!await load(e,tourGames))return;
     tourPage(e);

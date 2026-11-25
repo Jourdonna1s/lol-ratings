@@ -293,3 +293,6 @@ footer{max-width:1200px;margin:0 auto;padding:20px 24px 36px;color:var(--mut);fo
 .wt{display:inline-flex;align-items:center;gap:2px;margin-left:4px;color:var(--gold);font-weight:700;font-size:12px;white-space:nowrap;vertical-align:1px;font-variant-numeric:tabular-nums}
 .wt svg{width:14px;height:14px;fill:currentColor}
 h1 .wt{font-size:.45em;gap:4px;margin-left:12px;vertical-align:.35em}h1 .wt svg{width:1em;height:1em}
+
+/* team page: name filter next to the other filters */
+.tfw{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end}.tnf select{min-width:180px}
