@@ -11,6 +11,8 @@ Keep this file in the same folder as the notebooks.
 import numpy as np
 import pandas as pd
 
+RATING_VERSION = "1.0"  # frozen 2026-11; any change to the formula or weights gets a new version in RATING_CHANGES.md
+
 CFG = {
     "MIN_GAMES": 10, "K": 3, "GAME_SD": 0.25, "PLAYER_SD": 0.15,
     # early score (first 15 minutes) per role; each role's weights sum to 1

@@ -114,6 +114,7 @@ K = 12                 # small-sample shrinkage (use the K_USE printed by the ba
 INTL_WEIGHT = 2.0      # one international game counts as this many domestic games in the overall rating
 TARGET_SD = 0.15       # typical spread of player ratings inside a role
 MIN_GAMES_CALIBRATION = 15
+SPREAD_MIN_PLAYERS = 30  # league_spread(): leagues with fewer rated players keep their spread
 # common split names for the major leagues (the region's own name is kept in the "split" field).
 # Other leagues keep their own split names.
 SPLIT_MAP = {
@@ -1897,6 +1898,27 @@ def calibrate_c(games):
     return c
 
 
+def league_spread(games, c_by_role):
+    """Same spread in every league: weaker, uneven leagues spread their player ratings wider than the main leagues
+    (their best players far above 1.00). For each baseline outside the first group (the main leagues, which set
+    c(role)) and the international one, measure the spread of its player ratings (players with MIN_GAMES_CALIBRATION+
+    league games) and narrow its game ratings to TARGET_SD: factor = TARGET_SD / spread, at most 1 (never stretched),
+    1 for baselines with fewer than SPREAD_MIN_PLAYERS rated players. Events and qualifiers use their home league's
+    baseline. Rankings inside a league don't change; the main leagues' numbers don't change."""
+    main = list(BASELINE_GROUPS)[0]
+    f = {}
+    for key, q in games[games["kind"] == "domestic"].groupby("baseline"):
+        if key in (main, "international"):
+            continue
+        t = rate_players(q, c_by_role)
+        t = t[t["games"] >= MIN_GAMES_CALIBRATION]
+        if len(t) >= SPREAD_MIN_PLAYERS:
+            f[key] = min(1.0, TARGET_SD / float((t["overall"] - 1).std()))
+    if f:
+        print("league spread factors:", {k: round(v, 2) for k, v in sorted(f.items(), key=lambda x: x[1])})
+    return f
+
+
 def default_table(games, c_by_role, leagues):
     """Per-player table (all games, domestic, international) for players_default_view.csv and the report."""
     dom_t = rate_players(games[games["kind"] == "domestic"], c_by_role).add_prefix("dom_").rename(columns={"dom_player": "player", "dom_role": "role"})
@@ -2093,7 +2115,7 @@ def write_site_data(games, c_by_role, cfg, out_dir, leagues, complete, tg, team_
     shown = leagues + sorted(set(g_out["league"]) - set(leagues))
     events = [lg for lg in EVENTS if lg in set(g_out.loc[g_out["kind"] == "event", "league"])]
     dump(os.path.join(out_dir, "index.json"), {
-        "version": "0.2",
+        "version": rc.RATING_VERSION,
         # the latest game in the data (not the build time, so a rebuild of the same data changes nothing)
         "data_until": tg["date"].max().strftime("%Y-%m-%d"),
         "note": "Performance rating relative to the games it is built from. Not a measure of skill or of league strength.",
@@ -2109,22 +2131,17 @@ def write_site_data(games, c_by_role, cfg, out_dir, leagues, complete, tg, team_
                    "reference_year": REFERENCE_YEAR, "baseline_groups": YEARS[REFERENCE_YEAR]["BASELINE_GROUPS"],
                    "baseline_groups_by_year": {y: YEARS.get(y, YEARS[REFERENCE_YEAR])["BASELINE_GROUPS"] for y in years}, "international": INTERNATIONAL, "qualifiers": sorted(QUALIFIERS),
                    "K": K, "intl_weight": INTL_WEIGHT,
-                   "min_games": MIN_GAMES_CALIBRATION, "target_sd": TARGET_SD, "c_by_role": c_by_role,
-                   "baselines": "each league its own baseline, except the leagues in baseline_groups, which share one; international games: their own baseline; events and qualifiers of international events: the baseline of each team's home league, weight 1, not counted as international",
-                   "formula": "rating = 1 + c(role) * sum(w * (game_rating - 1)) / (sum(w) + K)",
-                   "early_weights": cfg["EARLY_WEIGHTS"], "late_groups": cfg["LATE_GROUPS"],
-                   "late_weights": cfg["LATE_WEIGHTS"], "early_share": cfg["EARLY_SHARE"],
-                   "tank_roles": cfg["TANK_ROLES"], "gold_champs": cfg["GOLD_CHAMPS"],
-                   "corrections": "fitted per year on the main leagues and international games: style stats against the champion's average in the role; lane leads against the champion matchup; the gold champions' extra gold"},
+                   # only what the site's math needs; the formula's weights stay in the code (the site explains concepts only)
+                   "min_games": MIN_GAMES_CALIBRATION, "c_by_role": c_by_role},
         "years": years, "files": files, "file_keys": fkeys, "game_fields": game_fields, "summary_fields": SUMMARY_FIELDS,
         "players": {"fields": PLAYER_FIELDS, "rows": prow},
         "team_fields": TEAM_FIELDS, "team_summary_fields": TEAM_SUMMARY_FIELDS,
         "teams": {"fields": TEAM_INDEX_FIELDS, "rows": trow},
         "tournaments": {"fields": TOUR_FIELDS, "rows": rows_of(tours[TOUR_FIELDS])}, "tournament_links": links,
         "awards": {"fields": AWARD_FIELDS, "rows": awards(g_out, tg, tours, raw, c_by_role)},
-        "elo": {k: v for k, v in elo_report.items() if k not in ("league_levels", "finals")} | {"league_levels": elo_report["league_levels"],
-                "base": team_elo.BASE, "weights": team_elo.WEIGHT, "title_bonus": team_elo.TITLE,
-                "decay": elo_report["decay"]},
+        # Elo: what the site shows (no tuning values: the site explains concepts only)
+        "elo": {k: v for k, v in elo_report.items() if k not in ("league_levels", "finals", "k", "decay", "roster_cut", "roster_days", "grid", "side")}
+               | {"league_levels": elo_report["league_levels"], "base": team_elo.BASE},
     })
 
 
@@ -2159,6 +2176,9 @@ def main(pattern=FILES, out_dir=OUT_DIR, show_report=False):
               "| international:", int((games["kind"] == "international").sum()), "| events:", int((games["kind"] == "event").sum()))
         print("splits per league:"); split_table(games)
         c_y = calibrate_c(games)
+        f_lg = games["baseline"].map(league_spread(games, c_y)).fillna(1.0)   # same spread in every league
+        for c in ["r_early", "r_late", "r_overall"]:
+            games[c] = 1 + (games[c] - 1) * f_lg
         if c_ref is None:
             if y != REFERENCE_YEAR:
                 raise SystemExit(f"the {REFERENCE_YEAR} file (REFERENCE_YEAR) is missing")

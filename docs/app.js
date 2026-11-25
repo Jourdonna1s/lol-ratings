@@ -307,19 +307,18 @@ function notes(L){
     if(L=='all'||l==L||L=='major'&&TY(l,y)=='major')part.push([l+(yv()=='all'?' '+y:''),v]);
   if(L==INTL)s.push('International games are rated against their own baseline.');
   else if(COMB(L)){
-    if(st.split=='all')s.push(`International games count ${C.intl_weight}×`+(L=='all'?', events and qualifiers count 1× (not as international games).':'.'));
+    if(st.split=='all')s.push('International games count more than league games'+(L=='all'?'; events and qualifiers count like league games.':'.'));
     else s.push(`A split covers the major leagues only (other leagues use their own split names).`);
     s.push(`Every league is rated against its own baseline${SHARED?' ('+SHARED+')':''}, so ratings from different leagues are not directly comparable.`);
   }else if(EV.has(L))s.push('Each team is rated against its home league’s baseline.');
   if(part.length)s.push('Only games with full stats count ('+part.map(([l,v])=>`${l}: ${v?Math.round(v*100)+'% of games':'none, so no player ratings'}`).join(', ')+').');
   return s.join(' ');
 }
-const E=D.elo||{},EW=E.weights||{};
+const E=D.elo||{};
 const ELO_NOTE=`Elo: team strength from game results, counting the opponents’ strength. ${E.base||1500} is the average team; league levels come from the whole season’s games between leagues, so all teams share one scale. `
-  +'Each series (Bo1, Bo3 or Bo5) changes Elo once, at its last game. '+(EW.WLDs?`Series count by where they are played: Worlds ${EW.WLDs}×, MSI ${EW.MSI}×, First Stand and EWC ${EW.FST}×, WSCI ${EW.WSCI}×, leagues 1×, events with major or tier 1 teams (e.g. KeSPA Cup) and qualifiers (EWC, Worlds) ${EW.event_major}×, EMEA Masters and other events ${EW.event}×. Winning a league split or event adds a title bonus.`:'')
-  +(E.decay?` A team’s Elo fades towards its league’s level after ${E.decay[0]} days without games (half every ${E.decay[1]} days).`:'')
-  +(E.roster_cut?` Each player new to a team (no games for it in ${E.roster_days} days) takes ${Math.round(E.roster_cut*100)}% of the team’s distance from its league’s level away.`:'')
-  +' Elo carries over from year to year; league levels are set per year.';
+  +'Each series (Bo1, Bo3 or Bo5) changes Elo once, at its last game. Bigger stages count more: international events most, then leagues, then smaller events. Winning a league split or event adds a title bonus. '
+  +'A team that has not played for a while slowly fades towards its league’s level, and new players on a team move it part of the way back towards that level. '
+  +'Elo carries over from year to year; league levels are set per year.';
 // Elo now (after decay, on the last day of the data), used when no split or stage is chosen
 const NOW=E.now||{},current=()=>st.split=='all'&&st.stage=='all'&&yv()==LAST_YEAR;
 // titles per team: [competition, date, bonus]
@@ -373,7 +372,7 @@ function header(cur){
   let el=document.getElementById('top');if(!el){el=document.createElement('header');el.className='top';el.id='top';app.before(el)}
   const other=theme()=='light'?'dark':'light';
   el.innerHTML=`<div class="hin"><a class="brand" href="#home">Pro Player <b>Ratings</b><small>v${esc(D.version||'0.1')}</small></a>
-  <nav class="menu" aria-label="Main">${[['home','Home'],['players','Players'],['teams','Teams'],['events','Tournaments']].map(([k,l])=>`<a href="#${k}"${k==cur?' class="on" aria-current="page"':''}>${l}</a>`).join('')}</nav>
+  <nav class="menu" aria-label="Main">${[['home','Home'],['players','Players'],['teams','Teams'],['events','Tournaments'],['about','How it works']].map(([k,l])=>`<a href="#${k}"${k==cur?' class="on" aria-current="page"':''}>${l}</a>`).join('')}</nav>
   <div class="hr"><div class="srch"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="q" type="search" placeholder="Search a player, team or tournament" aria-label="Search a player, team or tournament" autocomplete="off"><div id="res"></div></div>
   <button type="button" class="thm" id="thm" aria-label="Switch to the ${other} theme">${other=='light'?'Light':'Dark'}</button></div></div>`;
   document.getElementById('thm').onclick=()=>{const t=theme()=='light'?'dark':'light';document.documentElement.setAttribute('data-theme',t);
@@ -411,7 +410,7 @@ function home(){
     <div class="card">${live.length?`<div class="pills">${live.map(e=>`<a class="pill" href="#${e.slug}">${esc(e.short)} ${e.year} · in progress</a>`).join('')}</div>`:''}
       <h1>Who performed best,<br>game by game</h1>
       <p class="mut lead">Performance ratings for pro players from per-game stats, and team strength from results, for ${LEAGUES.length} leagues, ${EVENTS.length} events and the international tournaments, ${YEARS[0]}–${LAST_YEAR}. A player rating of 1.00 is an average performance in the games counted, not a measure of skill.${until?` Games up to ${until}.`:''}</p>
-      <div class="btns"><a class="btn pri" href="#players">Player leaderboards</a><a class="btn" href="#teams">Team leaderboards</a><a class="btn" href="#events">Tournaments</a></div></div>
+      <div class="btns"><a class="btn pri" href="#players">Player leaderboards</a><a class="btn" href="#teams">Team leaderboards</a><a class="btn" href="#events">Tournaments</a><a class="btn" href="#about">How the ratings work</a></div></div>
     <div class="card hstats">${[[k(list.length),'Players'],[k(teams.length),'Teams'],[k(TOURS.length),'Tournaments'],[YEARS.length,'Seasons']].map(([v,l])=>`<div><b>${v}</b><span>${l}</span></div>`).join('')}</div>
   </section>
   <div class="prev">
@@ -426,6 +425,24 @@ function home(){
       <p class="mut sm">Major leagues and international events.</p></div>
   </div>
   <p class="mut sm">${esc(ELO_NOTE)}</p>`;
+  wireSearch();
+}
+// methodology: the rating explained in plain words, concepts only (no weights or numbers from the formula)
+function aboutPage(){
+  header('about');
+  const S=[
+  ['What a rating is',`<p>Each player gets a rating for every game, built from the game’s stats and compared with the other players in the same role. A rating of 1.00 is an average performance in the games counted; above 1.00 is better than average, below is worse.</p>
+   <p>These are <b>performance ratings relative to the games counted, not a measure of skill</b>. They describe how a player’s games went by the numbers, not how good the player is.</p>`],
+  ['Early game and late game',`<p>Every game has an early part (the laning phase) and a late part (the rest of the game), and both count towards the rating. The early part looks at the lane: gold, experience and farm leads, kills, assists, deaths and first blood. Each role is judged on what matters for it: laners on their lane leads, junglers also on the early dragons, Heralds and void grubs their team takes, supports on their involvement in kills rather than their gold.</p>`],
+  ['Fights, gold, vision and pressure',`<p>After the early game the rating looks at how a player took part in the team’s fights (kills, assists and staying alive), the damage they dealt or, for tanks, the damage they absorbed for the team, how the gold lead grew or shrank, vision (wards placed and cleared), and pressure on towers. Each role weighs these differently: a support’s vision counts more than a top laner’s, a top laner’s damage to towers more than a support’s.</p>`],
+  ['Champions and matchups',`<p>Some champions naturally deal more damage, place more wards or win their lane more often. The rating compares a player with what is usual for their champion, and lane leads with what is usual for that matchup, so a player is not rewarded or punished just for the pick. Champions whose abilities give extra gold have that taken into account too. These comparisons come from the main leagues and international events of the same year.</p>`],
+  ['Few games and ranges',`<p>A player’s overall rating combines their game ratings. With only a few games the rating is pulled towards average, because a few good or bad games say little; the more games, the more the rating is the player’s own. The range next to a rating shows how far it could reasonably be off given the games so far. Leaderboards list players with enough games in the selection.</p>`],
+  ['Leagues and international games',`<p>Every league is rated against its own players, so a rating says how a player did compared with that league; ratings from different leagues are not directly comparable. The four major leagues share one baseline, and international games have their own. International games count more than league games in a player’s overall rating; events and qualifiers count like league games. Each year is rated on its own, so new games or leagues never change another year’s numbers.</p>`],
+  ['Team Elo',`<p>Team strength is a separate, win-based measure: teams gain Elo by winning and lose it by losing, more against stronger opponents and on bigger stages. It does not use the player ratings and does not change them. League levels come from games between leagues, so all teams share one scale.</p>`],
+  ['Awards',`<p>Tournament MVPs, Finals MVPs and Players of the Year shown on tournament pages are ours, picked from the ratings, and are not official. Official awards from the leagues are shown separately and marked as official.</p>`],
+  ['Data',`<p>Game data from Oracle’s Elixir, updated daily. Only games with full stats are rated; leagues with partial data appear on the team side only. Rating version ${esc(D.version||'')}.</p>`]];
+  app.innerHTML=crumbs([['#home','Home'],[null,'How it works']])+`<div class="bhead"><h1 class="pt">How the ratings work</h1><p class="mut sm">The ideas behind the player ratings and team Elo, in plain words</p></div>
+  <div class="about">${S.map(([h,t])=>`<section class="panel"><h2>${h}</h2>${t}</section>`).join('')}</div>`;
   wireSearch();
 }
 // leaderboard pages: filters in a side panel, the board on the right; the title names the selection
@@ -454,7 +471,7 @@ function draw(){
   const mb=document.getElementById('mb');
   mb.innerHTML=tot>20&&!st.all?`<button class="more" id="more">Show all ${tot}</button>`:'';
   if(mb.firstChild)document.getElementById('more').onclick=()=>{st.all=1;draw()};
-  document.getElementById('fn').textContent=`${describe(st.lg,b.thr)}. Ranges are a ~90% interval. ${notes(st.lg)}`;
+  document.getElementById('fn').textContent=`${describe(st.lg,b.thr)}. Ranges show the likely rating given the games so far. ${notes(st.lg)}`;
 }
 
 function teamsPage(){
@@ -522,7 +539,7 @@ function playerPage(p){
   ${champs.map(([c,v])=>{const r=rate(v.gs,F.r_overall);return`<tr><td>${champ(c)}</td><td>${v.n}</td><td>${(100*v.w/v.n).toFixed(0)}%</td><td>${((v.k+v.a)/Math.max(v.d,1)).toFixed(2)}</td><td class="${r?rc(r.x):'mut'}"><b>${r?f2(r.x):'—'}</b></td></tr>`}).join('')}</table></div></div>`;
   app.innerHTML=top+`
   <div class="cards">${card('Overall rating · '+esc(selection(st.plg)),o,1)}${card('Domestic',d)}${card('International',i)}${card('Early game',e)}${card('Late game',l)}</div>
-  <p class="mut sm pnote">Ranges are a ~90% interval. Overall counts international games ${C.intl_weight}×${p.games.some(g=>g[F.kind]=='event')?', events and qualifiers 1× (they are not in the International rating)':''}. Performance ratings relative to the games counted, not skill.</p></section>
+  <p class="mut sm pnote">Ranges show the likely rating given the games so far. Overall counts international games more than league games${p.games.some(g=>g[F.kind]=='event')?'; events and qualifiers count like league games (they are not in the International rating)':''}. Performance ratings relative to the games counted, not skill.</p></section>
   <div class="cols">${left?`<div>${left}</div><div>${statsP}${champP}</div>`:`<div>${champP}</div><div>${statsP}</div>`}</div>
   ${cabinet(AWP[p.i]||[])}
   <h2>Games</h2><div class="tw"><table><tr><th>Date</th><th>Rating</th><th></th><th>vs</th><th>Champion</th><th>K/D/A</th><th>GD@15</th><th>Event</th></tr>
@@ -891,7 +908,7 @@ function tourPage(e){
   <h2>Players</h2>${pst.length>1?`<div class="fbar"><select id="f-es" aria-label="Stage" class="${st.estage!='all'?'on':''}">${[['all','All stages'],...pst.map(g=>[g.k,g.name])].map(([k,l])=>`<option value="${k}"${String(k)==String(st.estage)?' selected':''}>${esc(l)}</option>`).join('')}</select></div>`:''}
   <h3 class="sh">Best player per role</h3>${ptab(best,'#')}
   <h3 class="sh">Top 10 players</h3>${ptab(rated.slice(0,10),'#')}
-  <p class="mut sm">Player performance ratings in this tournament’s games${st.estage!='all'?' ('+esc(stages[st.estage].name)+')':''} (relative to the games counted, not a measure of skill); players with ${thr}+ games. Ranges are a ~90% interval.</p>
+  <p class="mut sm">Player performance ratings in this tournament’s games${st.estage!='all'?' ('+esc(stages[st.estage].name)+')':''} (relative to the games counted, not a measure of skill); players with ${thr}+ games. Ranges show the likely rating given the games so far.</p>
   <h2>Draft</h2><div class="draft">${dl('Most picked · win %',top(pk,x=>x.n),x=>`<td>${x.n}</td><td class="mut">${Math.round(100*x.w/x.n)}%</td>`)}${dl('Most banned',top(bn,x=>x),x=>`<td>${x}</td>`)}${dl('Presence (picked or banned)',top(pr,x=>x),x=>`<td>${Math.round(100*x/Math.max(1,G.size))}%</td>`)}</div>
   <h2>Records</h2><div class="cards">${rec('Longest game',ext(len,1),lmean.length?ext(len,1)[0][TF.minutes].toFixed(1)+' min':'')}${rec('Shortest game',ext(len,-1),lmean.length?ext(len,-1)[0][TF.minutes].toFixed(1)+' min':'')}${(g=>rec('Most kills in a game',g,g?kills(g)+' kills':''))(ext(kills,1))}</div>
   <h2>Match history</h2>${history()}
@@ -1015,6 +1032,7 @@ async function route(){
     if(!s){app.innerHTML=header('events')+nf;wireSearch();return}
     st.mg=/^g\d+$/.test(gp||'')?+gp.slice(1):'all';matchPage(s,pf);
   }else if(h=='events')eventsPage();
+  else if(h=='about')aboutPage();
   else if(h=='players'||h=='teams'){
     st.year=fitYear(st.year,boardYears(st.lg));
     if(!yearsFor(st.year).every(y=>SLOADED.has(y))){app.innerHTML='<p class="mut">Loading…</p>';
