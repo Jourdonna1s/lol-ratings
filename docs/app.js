@@ -204,8 +204,27 @@ function statsTable(gs,role,basis,perGame){
     return r?`<tr class="subh"><th colspan="4">${grp}</th></tr>`+r:''}).join('');
   return rows?`<div class="tw"><table class="stt"><tr><th>Stat</th><th>${perGame?'This game':'Per game'}</th><th>Average</th><th class="pcell"></th></tr>${rows}</table></div>`:'';
 }
+// the six stats that matter most for each role, shown as big cards (the full list stays in "All stats")
+const KEY_STATS={top:['gd15','csd15','kp','ds','dmg','twr'],jng:['obj','kp','xpd15','ds','dmg','vspm'],mid:['gd15','csd15','kp','ks','dmg','ds'],
+  bot:['gd15','csd15','ks','dmg','ds','swing'],sup:['kp15','kp','ds','vspm','wpm','cwpm']};
+const STAT_DEF={};STATS.forEach(([,l])=>l.forEach(x=>STAT_DEF[x[0]]=x));
+const ROLE_PL={top:'top laners',jng:'junglers',mid:'mid laners',bot:'bot laners',sup:'supports'};
+// one card: big value, a bar filled to the player's standing among the role (or this game against the average), the average
+function keyCards(gs,role,basis,perGame){
+  const A=basis&&((AVG[basis.y]||{})[basis.b]||{})[role]||{};
+  const cards=(KEY_STATS[role]||[]).map(k=>{const d=STAT_DEF[k];if(!d)return'';const[,lab,f,dir]=d,v=svMean(gs,k);if(v==null)return'';
+    const q=A[k],av=q?q[0]:null;let fill=null,txt='';
+    if(q){const p=pctOf(q,v),b=dir<0?100-p:p;fill=Math.max(2,Math.min(100,Math.round(dir?b:p)));
+      txt=perGame?(dir?(b>=65?`better than most ${ROLE_PL[role]||''}`:b<=35?`worse than most ${ROLE_PL[role]||''}`:'about average'):''):`${dir?'better':'more'} than ${Math.round(dir?b:p)}% of ${ROLE_PL[role]||'players'}`}
+    const cls=fill==null||!dir?'n':fill>=65?'g':fill<=35?'b':'n';
+    return`<div class="kc ${cls}"><div class="kl">${lab}</div><div class="kv">${sfmt(f,v)}</div>
+      <div class="kbar">${fill!=null?`<i style="width:${fill}%"></i>`:''}</div>
+      <div class="km"><span>Avg ${sfmt(f,av)}</span>${txt?`<span>${txt}</span>`:''}</div></div>`}).join('');
+  return cards?`<div class="kcs">${cards}</div>`:'';
+}
 function partsBlock(gs){
-  const r=PARTS.map(([k,lab])=>{const m=svMean(gs,k);return m==null?'':`<div class="part"><span>${lab}</span>${bandBar(m)}<span class="mut sm">${bandWord(m)}</span></div>`}).join('');
+  const r=PARTS.map(([k,lab])=>{const m=svMean(gs,k);if(m==null)return'';const c=m>=.25?'g':m<=-.25?'b':'n';
+    return`<div class="part ${c}"><span class="pl2">${lab}</span>${bandBar(m)}<span class="pw2">${bandWord(m)}</span></div>`}).join('');
   return r?`<div class="parts">${r}</div>`:'';
 }
 async function gamesOf(p){
@@ -592,8 +611,10 @@ function playerPage(p){
   const basis=basisOf(gs),hasSt=gs.some(g=>g.st);
   if(hasSt&&basis&&!SLOADED.has(basis.y))ensureYears([basis.y]).then(()=>{if(location.hash=='#'+p.slug)playerPage(p)},()=>{});
   const behind=hasSt?`<div class="panel"><div class="phd"><h2>Stats behind the rating</h2><span class="mut sm">vs ${basis?esc(baseName(basis.b,basis.y)):'—'}</span></div>
-    ${partsBlock(gs)}${statsTable(gs,p.role,basis)}
-    <p class="mut sm">Per-game averages in the selection next to the average ${esc((RL[p.role]||p.role).toLowerCase())} in ${basis?esc(baseName(basis.b,basis.y)):'the league'} (players with enough games); the bar shows where this player stands among them. The parts at the top say in words how each part of the player’s games compares with the role. Performance relative to the games counted, not skill.</p></div>`:'';
+    ${keyCards(gs,p.role,basis)}
+    <h3 class="sth">How each part of the game compares</h3>${partsBlock(gs)}
+    <details class="allst"><summary>All stats</summary>${statsTable(gs,p.role,basis)}</details>
+    <p class="mut sm">Per-game averages in the selection next to the average ${esc((RL[p.role]||p.role).toLowerCase())} in ${basis?esc(baseName(basis.b,basis.y)):'the league'} (players with enough games); each bar shows where this player stands among them (green: among the better ones, red: among the weaker ones); “All stats” has every stat. The parts say in words how each part of the player’s games compares with the role. Performance relative to the games counted, not skill.</p></div>`:'';
   app.innerHTML=top+`
   <div class="cards">${card('Overall rating · '+esc(selection(st.plg)),o,1)}${card('Domestic',d)}${card('International',i)}${card('Early game',e)}${card('Late game',l)}</div>
   <p class="mut sm pnote">Ranges show the likely rating given the games so far. Overall counts international games more than league games${p.games.some(g=>g[F.kind]=='event')?'; events and qualifiers count like league games (they are not in the International rating)':''}. Performance ratings relative to the games counted, not skill.</p></section>
@@ -996,7 +1017,7 @@ function gameDetail(g){
   if(x('dmg_off')!=null&&A.dmg&&x('dmg')!=null)notes.push(`Share of the team’s damage: ${sfmt('pct',x('dmg'))}; usual for ${esc(g[F.champion])} as ${esc((RL[role]||role).toLowerCase())}: ${sfmt('pct',A.dmg[0]+x('dmg_off'))}.`);
   return`<div class="gdet"><div>${partsBlock([g])}${notes.length?`<p class="sm">${notes.join('<br>')}</p>`:''}
     <p class="mut sm">The rating compares this game with the ${esc((RL[role]||role).toLowerCase())}s in ${b?esc(baseName(b.b,b.y)):'the league'}, taking the champion and the lane matchup into account.</p></div>
-    <div>${statsTable([g],role,b,1)}</div></div>`;
+    <div>${keyCards([g],role,b,1)}<details class="allst"><summary>All stats</summary>${statsTable([g],role,b,1)}</details></div></div>`;
 }
 function matchPage(s,pf){
   const R=s.rows,r0=R[0],A=r0[TF.ti],B=r0[TF.oi],gns=[...new Set(R.map(r=>r[TF.gn]))].sort((a,b)=>a-b);

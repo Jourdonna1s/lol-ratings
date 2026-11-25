@@ -327,3 +327,21 @@ table.stt{min-width:0}
 .parts{display:grid;gap:6px;margin:0 0 14px}
 .part{display:grid;grid-template-columns:96px auto 1fr;gap:8px;align-items:center;font-size:14px}
 @media (max-width:600px){.gdet{grid-template-columns:1fr}.stt td:first-child{min-width:0;white-space:normal}.stt .pcell{min-width:0}.pcell{display:none}.pm{display:block;margin-top:4px}.pbar{width:90px}.stt td,.stt th{padding-left:8px;padding-right:8px}}
+/* key stat cards (player and match pages) */
+.kcs{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:4px 0 18px}
+.kc{background:var(--card2);border:1px solid var(--line);border-radius:var(--r2);padding:14px 16px;display:flex;flex-direction:column;gap:6px}
+.kl{font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--mut)}
+.kv{font-family:'Barlow Condensed',system-ui,sans-serif;font-weight:700;font-size:40px;line-height:1}
+.kc.g .kv{color:var(--good)}.kc.b .kv{color:var(--bad)}
+.kbar{height:6px;border-radius:3px;background:var(--line);overflow:hidden}
+.kbar i{display:block;height:100%;border-radius:3px;background:var(--avg)}.kc.g .kbar i{background:var(--good)}.kc.b .kbar i{background:var(--bad)}
+.km{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:13px;color:var(--mut)}
+.sth{font-size:16px;margin:0 0 10px}
+.parts{grid-template-columns:repeat(5,1fr);gap:10px}
+.part{display:flex;flex-direction:column;gap:6px;background:var(--card2);border:1px solid var(--line);border-radius:var(--r2);padding:10px 12px;font-size:14px}
+.part .pbar.mid{width:100%;margin:0}.pl2{font-weight:600}.pw2{font-size:13px;color:var(--mut)}.part.g .pw2{color:var(--good)}.part.b .pw2{color:var(--bad)}
+.allst{margin:6px 0 10px}.allst summary{cursor:pointer;font-weight:600;padding:8px 0;color:var(--ac)}
+.gdet .kcs{grid-template-columns:repeat(3,1fr);gap:8px}.gdet .kv{font-size:30px}.gdet .parts{grid-template-columns:1fr;gap:6px}
+.gdet .part{display:grid;grid-template-columns:92px 1fr;grid-template-rows:auto auto;column-gap:10px;row-gap:2px;padding:8px 10px;align-items:center}.gdet .part .pl2{grid-row:span 2}
+@media (max-width:900px){.kcs{grid-template-columns:repeat(2,1fr)}.parts{grid-template-columns:repeat(3,1fr)}}
+@media (max-width:600px){.kv{font-size:32px}.parts{grid-template-columns:repeat(2,1fr)}.gdet .kcs{grid-template-columns:repeat(2,1fr)}}
