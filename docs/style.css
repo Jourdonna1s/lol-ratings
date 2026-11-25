@@ -296,3 +296,15 @@ h1 .wt{font-size:.45em;gap:4px;margin-left:12px;vertical-align:.35em}h1 .wt svg{
 
 /* team page: name filter next to the other filters */
 .tfw{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end}.tnf select{min-width:180px}
+
+/* double elimination: upper and lower bracket lanes, grand final on the right */
+.brw.de{display:block}
+.de .lanes{display:flex;flex-direction:column;gap:18px;min-width:max-content}
+.de .lane{border-left:3px solid var(--line);padding-left:12px}.de .lane.up{border-left-color:var(--ac)}.de .lane.lo{border-left-color:var(--bad)}
+.de .lh{font-family:var(--disp);text-transform:uppercase;font-size:17px;letter-spacing:.04em;margin-bottom:8px}
+.de .lane.up .lh{color:var(--ac)}.de .lane.lo .lh{color:var(--bad)}
+.de .gf .bx{border-color:var(--gold)}.de .gf .bh{color:var(--gold)}
+.bt span{display:flex;flex-direction:column;min-width:0}
+.bn{font-style:normal;font-size:11px;font-weight:400;color:var(--mut);line-height:1.2}
+.lane.lo .bn{color:var(--bad)}
+.de .br{gap:20px}.de .bc{width:196px}.de .bc+.bc .bx::before{left:-21px;width:20px}
