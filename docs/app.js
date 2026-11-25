@@ -640,7 +640,7 @@ function teamPage(t){
   <h1>${esc(t.name)}${wbt(t)}</h1>
   <div class="mut">${esc(NAME(t.league))}${others.length?' · also '+esc(others.join(', ')):''} · Elo now <b style="color:var(--fg)">${Math.round(NOW[t.i]??last.r[TF.elo_after])}</b> · ${rank.lg?`#${rank.lg} of ${rank.of} in ${esc(t.league)} · #${rank.all} of ${rank.ofAll} teams`:`not ranked (no games in the latest ${esc(t.league)} split${LATEST[t.league]?', '+esc(LATEST[t.league].p):''})`}</div>
   ${pn.length?`<div class="sm mut" style="margin-top:4px">Previously ${pn.map(([nm,a,b])=>`<button class="link sm" data-tn="${esc(nm)}">${esc(nm)}</button> (${a==b?a:a+'–'+b})`).join(', ')}</div>`:''}
-  ${(AWT[t.i]||[]).some(a=>a.kind=='champion')?`<div class="sm" style="margin-top:4px"><b>Titles:</b> ${AWT[t.i].filter(a=>a.kind=='champion').length} · <a href="#cab">trophy cabinet ↓</a></div>`:''}</div>
+  ${(AWT[t.i]||[]).some(a=>a.kind=='champion')?`<div class="sm" style="margin-top:4px"><b>Titles:</b> ${AWT[t.i].filter(a=>a.kind=='champion').length}</div>`:''}</div>
 </div>
   <div class="tfw">${t.names?`<label class="fl tnf"><span>Name</span><select id="f-tn" class="${st.tname!='all'?'on':''}">${[['all','All names'],...t.names.map(([nm,a,b])=>[nm,`${nm} (${a==b?a:a+'–'+b})`])].map(([k,l])=>`<option value="${esc(k)}"${st.tname==k?' selected':''}>${esc(l)}</option>`).join('')}</select></label>`:''}<div id="fb"></div></div></div>`;
   const redraw=()=>{st.tpg=0;teamPage(t)},bar=()=>{filters(document.getElementById('fb'),['all',...ls],st.tlg,k=>st.tlg=k,redraw,0,t.rows);
