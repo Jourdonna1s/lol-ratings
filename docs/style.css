@@ -119,6 +119,7 @@ select.on{color:var(--onac);background-color:var(--ac);border-color:var(--ac)}op
 .cols>div>h2:first-child,.cols>div>.panel:first-child h2{margin-top:0}
 .panel{border:1px solid var(--line);border-radius:var(--r3);background:var(--card);padding:16px 18px;margin-bottom:18px}
 .panel>h2{margin:0 0 12px}
+.about{max-width:760px}.about .panel p{margin:0 0 10px;line-height:1.6}.about .panel p:last-child{margin-bottom:0}
 .panel .tw{border:0;border-radius:0;margin:0 -18px -16px;border-top:1px solid var(--line)}
 
 /* tables */
