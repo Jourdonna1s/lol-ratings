@@ -5,6 +5,8 @@ const app=document.getElementById('app');
 const getJSON=async u=>{const idx=u=='data/index.json',v=!idx&&typeof D!='undefined'&&D&&D.data_until&&u.startsWith('data/')?(u.includes('?')?'&':'?')+'v='+D.data_until:'';
   const r=await fetch(u+v,idx?{cache:'no-cache'}:{});if(!r.ok)throw new Error(u+' '+r.status);return r.json()};
 // a tab left open: when it comes back after 30+ minutes, reload if the data was updated meanwhile
+// sw.js keeps the versioned data files, fonts and champion icons on the device between visits
+if('serviceWorker' in navigator)try{navigator.serviceWorker.register('sw.js').catch(()=>{})}catch(e){}
 let seenAt=Date.now();
 document.addEventListener('visibilitychange',async()=>{if(document.visibilityState!='visible'||Date.now()-seenAt<18e5)return;seenAt=Date.now();
   try{const n=await getJSON('data/index.json');if(D&&n.data_until&&n.data_until!=D.data_until)location.reload()}catch(e){}});
@@ -626,6 +628,11 @@ function teamPage(t){
   const ls=[...LEAGUES,...EVENTS,INTL].filter(l=>t.rows.some(g=>inL(g,l)));
   if(st.tlg!='all'&&!ls.includes(st.tlg))st.tlg='all';
   st.pyear=fitYear(st.pyear,rowYears(t.rows,st.tlg));
+  // the summary years this view needs, loaded on demand (a team page does not wait for every year): the chosen year
+  // (all the team's years for All years) and every year from the team's last one on (its players' later teams)
+  const tys=rowYears(t.rows,'all'),need=[...(st.pyear=='all'?tys:[st.pyear]),...YEARS.filter(y=>+y>=+tys[tys.length-1])].filter(y=>!SLOADED.has(String(y)));
+  if(need.length){const h=location.hash;app.innerHTML='<p class="mut">Loading…</p>';
+    ensureYears(need).then(()=>{if(location.hash==h)teamPage(t)},()=>{if(location.hash==h)app.innerHTML='<p>Could not load this page. <a href="#home">Back to the main page</a></p>'});return}
   const pn=prevNames(t);if(st.tname!='all'&&!(t.names||[]).some(x=>x[0]==st.tname))st.tname='all';
   const gs=t.rows.filter(g=>keep(g,st.tlg)&&(st.tname=='all'||g.r[TF.team]==st.tname)),n=gs.length,R=g=>g.r;
   const others=[...new Set(t.rows.map(g=>g[F.league]))].filter(l=>l!=t.league);
@@ -987,10 +994,7 @@ async function route(){
     // a chosen split only makes sense with its league, so carry the league over in that case
     pyear(p.games);st.plg=st.split!='all'&&p.games.some(g=>inL(g,st.lg))?st.lg:'all';playerPage(p);
   }else if(t){
-    // a team page: the team's years and every later one (its players' later teams)
-    const y0=Math.min(...t.files.map(k=>+k.slice(0,4)));
-    try{await ensureYears(YEARS.filter(y=>+y>=y0))}catch(err){app.innerHTML='<p>Could not load this page. <a href="#home">Back to the main page</a></p>';return}
-    if(my!=nav)return;
+    // a team page: teamPage() loads the summary years it needs
     if(!await load(t,teamGames))return;
     if(t.slug!=h)history.replaceState(null,'','#'+t.slug);
     pyear(t.rows);st.tlg=st.split!='all'&&t.rows.some(g=>inL(g,st.lg))?st.lg:'all';st.tname='all';teamPage(t);
