@@ -304,7 +304,9 @@ h1 .wt{font-size:.45em;gap:4px;margin-left:12px;vertical-align:.35em}h1 .wt svg{
 .de .lh{font-family:var(--disp);text-transform:uppercase;font-size:17px;letter-spacing:.04em;margin-bottom:8px}
 .de .lane.up .lh{color:var(--ac)}.de .lane.lo .lh{color:var(--bad)}
 .de .gf .bx{border-color:var(--gold)}.de .gf .bh{color:var(--gold)}
-.bt span{display:flex;flex-direction:column;min-width:0}
-.bn{font-style:normal;font-size:11px;font-weight:400;color:var(--mut);line-height:1.2}
-.lane.lo .bn{color:var(--bad)}
-.de .br{gap:20px}.de .bc{width:196px}.de .bc+.bc .bx::before{left:-21px;width:20px}
+.bt span{flex:1;min-width:0}
+.bn{flex:none;font-style:normal;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;line-height:1;padding:3px 6px;border-radius:4px;border:1px solid var(--line);color:var(--mut)}
+.bn.out{border-color:var(--bad);color:var(--bad)}
+.de .br{gap:14px}.de .bc{width:206px}.de .bc+.bc .bx::before{left:-15px;width:14px}
+.de .lk{font-family:var(--sans,system-ui);text-transform:none;letter-spacing:0;font-size:12px;font-weight:400;color:var(--mut);margin-left:8px}
+.bn{padding:3px 5px}

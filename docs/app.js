@@ -788,7 +788,7 @@ function tourPage(e){
   // a bracket stage as columns of series: a series' round = 1 + the latest round either team already played in this stage
   // (single elimination gives quarterfinals, semifinals, final; double elimination gives its rounds in order)
   // series box: date, best-of, both teams with games won; a note under a team (e.g. "↓ lower bracket", "out")
-  const bbox=(x,note)=>{const side=(ti,w,won)=>`<div class="bt${won?' w':''}"><span>${esc(x.nm[ti])}${!won&&note?`<i class="bn">${note}</i>`:''}</span><b>${w}</b></div>`;
+  const bbox=(x,note)=>{const side=(ti,w,won)=>`<div class="bt${won?' w':''}"><span>${esc(x.nm[ti])}</span>${!won&&note?`<i class="bn${note=='out'?' out':''}" title="${note=='out'?'Out of the tournament':'Drops to the lower bracket'}">${note=='out'?'Out':'↓ LB'}</i>`:''}<b>${w}</b></div>`;
     return`<a class="bx${x.id==e.final?' fin':''}" href="${mhref(e.k,x.id)||'#'+e.slug}"><span class="bd">${dm(x.date)} · ${bo(x)}</span>${side(x.a,x.wa,x.wa>x.wb)}${side(x.b,x.wb,x.wb>x.wa)}</a>`};
   // columns of rounds; each earlier round in the order of the series its winner plays next (pairs feeding one series together)
   const bcols=(ser,rd)=>{const n=Math.max(...ser.map(x=>rd.get(x))),cols=[...Array(n)].map((_,i)=>ser.filter(x=>rd.get(x)==i+1));
@@ -807,8 +807,8 @@ function tourPage(e){
     const cols=(cs,fin,note)=>cs.map((c,i)=>`<div class="bc"><div class="bh">${i==cs.length-1&&cs.length>1?fin:'Round '+(i+1)}</div><div class="bm">${c.map(x=>bbox(x,note)).join('')}</div></div>`).join('');
     // the grand final ends the upper-bracket row (it has fewer rounds than the lower one)
     const gfc=gf.length?`<div class="bc gf"><div class="bh">Grand final</div><div class="bm">${gf.map(x=>bbox(x,'')).join('')}</div></div>`:'';
-    return`<div class="brw de"><div class="lanes"><div class="lane up"><div class="lh">Upper bracket</div><div class="br">${cols(U,'Upper final','↓ lower bracket')}${gfc}</div></div>
-      <div class="lane lo"><div class="lh">Lower bracket</div><div class="br">${cols(Lw,'Lower final','out')}</div></div></div></div>`};
+    return`<div class="brw de"><div class="lanes"><div class="lane up"><div class="lh">Upper bracket <span class="lk">↓ LB = drops to the lower bracket</span></div><div class="br">${cols(U,'Upper final','↓ lower bracket')}${gfc}</div></div>
+      <div class="lane lo"><div class="lh">Lower bracket <span class="lk">Out = out of the tournament</span></div><div class="br">${cols(Lw,'Lower final','out')}</div></div></div></div>`};
   const bracket=g=>{if(g.type!='bracket'||g.ser.length<2||g.ser.length>31)return'';
     const d=dbl(g);if(d)return d;
     const last={},rd=new Map();for(const x of [...g.ser].sort((a,b)=>a.date.localeCompare(b.date)||a.id-b.id)){const r=1+Math.max(last[x.a]||0,last[x.b]||0);rd.set(x,r);last[x.a]=last[x.b]=r}
