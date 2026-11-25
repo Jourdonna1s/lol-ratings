@@ -1591,8 +1591,9 @@ def ordinal(n):
 
 
 def placings(c, f, stages):
-    """[[team, place]]: a finished tournament with a champion: 1st, 2nd, then the other teams by how late they went out
-    (teams out on the same day share a place, e.g. "3rd-4th"); only games up to the final count. A tournament still being
+    """[[team, place]]: a finished tournament with a champion: 1st, 2nd, then the losers of the final stage by round when
+    it is single elimination (semifinal losers 3rd-4th, quarterfinal losers 5th-8th), then the other teams by how late
+    they went out (teams out on the same day share a place, e.g. "9th-12th"); only games up to the final count. A tournament still being
     played: the stage each team reached. Else none."""
     if not f["done"]:
         out = []
@@ -1602,8 +1603,39 @@ def placings(c, f, stages):
         return out if len(stages) > 1 else []
     if f["champ"] is None:
         return []
-    last = c[c["date"] <= f["date"]].groupby("ti")["date"].max().drop([f["champ"], f["runner"]], errors="ignore")
     out, n = [[f["champ"], "1st"]] + ([[f["runner"], "2nd"]] if f["runner"] is not None else []), 3
+    # the stage with the final, when it is single elimination (no team loses twice): the losers of the same round share
+    # a place (quarterfinal losers 5th-8th), whatever day they played; a series' round = 1 + the latest round either team
+    # already played in the stage (the same rule as the bracket in docs/app.js)
+    done = {f["champ"], f["runner"]}
+    fs = next((g for g in stages if (c.loc[in_stage(g, c), "series"] == f.get("series")).any()), None)
+    if fs is not None:
+        k = c[in_stage(fs, c) & (c["date"] <= f["date"])]
+        ser = k.groupby(["series", "ti"]).agg(w=("result", "sum"), d=("date", "min")).reset_index()
+        rows, lost = [], {}
+        for sid, g in sorted(ser.groupby("series"), key=lambda x: (x[1]["d"].min(), x[0])):
+            if len(g) != 2 or g["w"].iloc[0] == g["w"].iloc[1]:
+                rows = None; break
+            g = g.sort_values("w", ascending=False)
+            rows.append((sid, int(g["ti"].iloc[0]), int(g["ti"].iloc[1])))
+        if rows and len(rows) > 1:
+            last_r, rd, single = {}, {}, True
+            for sid, w, l in rows:
+                if l in lost or w in lost:
+                    single = False; break
+                r = 1 + max(last_r.get(w, 0), last_r.get(l, 0))
+                last_r[w] = last_r[l] = r
+                lost[l] = r
+            if single and rows[-1][0] == f.get("series"):
+                for r in sorted({v for v in lost.values()}, reverse=True):
+                    grp = [ti for ti, v in lost.items() if v == r and ti not in done]
+                    if not grp:
+                        continue
+                    lab = ordinal(n) if len(grp) == 1 else f"{ordinal(n)}–{ordinal(n + len(grp) - 1)}"
+                    out += [[ti, lab] for ti in grp]
+                    n += len(grp)
+                    done |= set(grp)
+    last = c[c["date"] <= f["date"]].groupby("ti")["date"].max().drop(list(done), errors="ignore")
     for _, grp in sorted(last.groupby(last.dt.normalize()), key=lambda x: -x[0].value):
         k = len(grp)
         lab = ordinal(n) if k == 1 else f"{ordinal(n)}–{ordinal(n + k - 1)}"
