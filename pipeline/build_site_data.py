@@ -159,6 +159,50 @@ YEARS = {
 # codes changed when the file is read (2015: OGN = the LCK; 2015-18: the EU LCS and NA LCS regional finals are filed
 # as "LEC" and "LCS").
 RENAME_LEAGUES = {}
+# TEAM_MERGE: rebrands that have a new teamid in the data, joined into one team (old teamid -> new teamid) when a file is
+# read, so the team has one page, one Elo line and its titles under its latest name; the index lists its earlier names
+# ("names"). Only renames of the same club (not a bought league spot: ROX Tigers -> Hanwha Life stays apart) and only
+# sequential names (never two at once: Samsung Blue played Samsung White in 2014 and stays apart). Chains point to the
+# latest team. Found by a scan of every team (a new team in the same league within 200 days keeping 2+ players),
+# then checked by hand.
+TEAM_MERGE = {
+    "oe:team:3354e252e33ed55fd8fa14595ca1564": "oe:team:ce499dea30cfce118f4fe85da0227e8",   # SK Telecom T1 (2015-19) -> T1
+    "oe:team:1aa8a23eb9d06ab039f112088bc905c": "oe:team:50f58982d91a36557ec8aec52ab014f",   # Samsung White (2014) -> Gen.G
+    "oe:team:3b84bb916852d07609c83d1ce91c1a9": "oe:team:50f58982d91a36557ec8aec52ab014f",   # Samsung Galaxy (2015-17) -> Gen.G
+    "oe:team:40588fea8e54db0dd6c86ed78262a13": "oe:team:50f58982d91a36557ec8aec52ab014f",   # KSV eSports (2018) -> Gen.G
+    "oe:team:fbf53cf218dfaa8c2b2a864d13d2206": "oe:team:1d0389df0c5eea93b04122ba167c010",   # Longzhu Gaming (2016-17) -> Kiwoom DRX
+    "oe:team:fce0c469080578fffd7034b5f2ff57d": "oe:team:1d0389df0c5eea93b04122ba167c010",   # Kingzone DragonX (2018-19) -> Kiwoom DRX
+    "oe:team:7338408a0fe0217451d2c9a567db999": "oe:team:a2065488a11a2c0a2403a7b347eec61",   # Team BDS (2021-25) -> Shifters
+    "oe:team:e120826aae03bee4be6cfec8ac49ede": "oe:team:46c474825b4767ff6113d344264f60f",   # e-mFire (2016) -> Kongdoo Monster
+    "oe:team:05bd29b524f0851d42e7902d6af59bf": "oe:team:aa56a2e65d8106aef3c61e4f6bf94fd",   # Alliance (2014) -> Elements
+    "oe:team:fe099196385a285d6d6edde504dc1f6": "oe:team:bc3824b0bbb8139d16109178faa4822",   # MGN Vikings Esports (2024-25) -> MVK Esports
+    "oe:team:b5454c08654c7f6175d1d887f80c769": "oe:team:48d7941ccbd5b89aca46c57b0c2f8fb",   # Victory Five (2019-22) -> Ninjas in Pyjamas
+    "oe:team:5627e3ef0b2477289b218ddeb6a151a": "oe:team:8516ca63facc91286d6c00212ca945e",   # Vici Gaming (2016-20) -> Rare Atom
+    "oe:team:c1dea751bdd62128fe179344fceb5b2": "oe:team:a9145b7711873f53e610fbba0493484",   # Snake Esports (2016-19) -> LNG Esports
+    # tier 2 and below: same club under a new name (a team with no teamid in the data: "name:<team name>")
+    "oe:team:8c840b4abee1640e81a94537623dc79": "oe:team:0327d25d005275cfaf3cdb62628d33f",   # Rising Star Gaming (2016-17) -> GC Busan Rising Star
+    "oe:team:3f907847a2567328254a7c414ed90d8": "oe:team:0327d25d005275cfaf3cdb62628d33f",   # Rising SuperStar Gaming (2017-18) -> GC Busan Rising Star
+    "oe:team:e42ade212c09777da0f54bffe481f6d": "oe:team:a66e91a2f91dd5b797328cdebf35039",   # Partizan Esports (2022-25) -> Partizan Sangal
+    "oe:team:3d95efcb0a40984886b3598f77eb167": "oe:team:64b1b7f74d693cae5d71675ac09e58b",   # Godlike Goats (2021) -> King of Goats
+    "oe:team:afa32967cbfd11cd4684a90c675346d": "oe:team:b945e7a96b93d96b108071ea38c013e",   # XTEN Mexico (2019) -> Zwan Gaming Mexico
+    "oe:team:02838cf562dd82da8db95974cc13a65": "oe:team:0de5bc0ac90e504b773c2d2d09edc81",   # Vorax Liberty Academy (2021) -> Liberty Academy
+    "oe:team:f16757c3e5eb0343bcb2d5c076847da": "oe:team:5107627a345e1239ad184df8cfa0695",   # vVv Gaming White (2014) -> vVv Gaming
+    "oe:team:18f958181ee7b75ce7aaaf299a311df": "oe:team:747118bb5b7c9205440e3d565a5f89f",   # Douyin Tony Top (2023) -> Team Tony Top
+    "oe:team:02040f0504a1cb0f0657964125e0ae2": "oe:team:747118bb5b7c9205440e3d565a5f89f",   # Tiktok Tony Top (2023) -> Team Tony Top
+    "oe:team:73062b9e7b567b8cd1f200e96efecc5": "oe:team:34d6d3e3a9181eaf86aa2c8ed613e93",   # Dragonsteel (2024) -> DarkZero Dragonsteel
+    "oe:team:7ddbc4d4273d3c7fda060bf1d4fb144": "oe:team:9114fb0f268de0d260acfef5fd97ef6",   # Dewish Tnu Team (2023) -> TNU Eagle (東南飛鷹)
+    "oe:team:bf1858c02d924648341c65c7fe4206f": "oe:team:362c31d38bf8e4a3fd5a37cfa8c449b",   # Ginger Turmeric (2022) -> Area of Effect Ginger Turmeric
+    "oe:team:99da90dcff59165c6007c4d57bc47eb": "oe:team:e6481ac0b615c35cfaa03161935029b",   # Orzeł Barcząca Esports (2025) -> Barcząca Esports by Yumisu
+    "oe:team:437a2fa4639d8cb1677176861d69260": "oe:team:b4923557f98ba20d401bcaf6c01b4aa",   # SuperMassive Academy (2019-21) -> SuperMassive Blaze Academy
+    "oe:team:9a09ff82bcddf9b01cb51081074c0ae": "oe:team:1fcd541d3a51d70860c46eaae858ba8",   # Royal Bandits (2017-18) -> Royal Youth
+    "oe:team:d83bffd1eb6ab4fc8b58abb3e646d48": "oe:team:0db4f03569e38f6ff1c09aa1907ca6d",   # Just Randoms (2020) -> Area of Effect Randoms
+    "name:Mkers Academy": "oe:team:39ef0c894423ffdfa22011f672f19be",   # Mkers Academy (2021) -> Mkers Academy
+    "name:Croatian Flair": "oe:team:9415028abedc9e368cb933f3903b4c4",   # Croatian Flair (2026) -> Croatian Flair
+    "name:Magyar Gamer Szövetsèg": "oe:team:0483d081a9edd48ed31ef0e3bd302dc",   # Magyar Gamer Szövetsèg (2026) -> Magyar Gamer Szövetsèg
+    "name:Bubliki": "oe:team:bf162bab8e051f463d8b675dba0639e",   # Bubliki (2026) -> Bubliki
+    "name:DeathMark E-Sports": "oe:team:b470f55106006bfa391ec1beeecf214",   # DeathMark E-Sports (2026) -> DeathMark E-Sports
+    "oe:team:adefd7d85fbbac120d5a3d411dbae3c": "oe:team:ff07fcf769a41fa17ded4746368d6c7",   # Team Dynamics Academy (2020) -> Nongshim RedForce Academy
+}
 _EU_NA = {"LCS": "NA LCS", "LEC": "EU LCS"}
 # OLD_DATE_SPLITS: games the data files under a split but that belong to another tournament, by date: promotion and
 # relegation series (filed under the next split), the 2014 expansion tournament, the LCS Lock In (2021-22, filed as
@@ -422,7 +466,7 @@ TEAM_FIELDS = ["team", "ti", "date", "league", "kind", "stage", "period", "split
                "inhibs", "gd15", "csd15", "xpd15", "dpm", "wpm", "vspm", "picks", "bans", "elo_before", "elo_after", "gn"]
 TEAM_SUMMARY_FIELDS = ["team", "league", "kind", "period", "split", "stage", "games", "wins", "s_won", "s_lost",
                        "gd_n", "gd_sum", "blue_games", "blue_wins", "first", "last", "elo"]
-TEAM_INDEX_FIELDS = ["name", "league", "games", "files"]
+TEAM_INDEX_FIELDS = ["name", "league", "games", "files", "names"]
 # tournaments: year, league, kind and split identify one (the same fields as on the game rows); champ/runner: team index
 TOUR_FIELDS = ["year", "league", "kind", "split", "period", "name", "first", "last", "teams", "series", "games", "champ", "runner",
                "done", "final", "playoffs", "format", "stages", "places", "tier"]
@@ -1117,7 +1161,9 @@ def home_leagues(df):
     """teamid -> the regular league the team played most games in (from the whole CSV)."""
     t = df[(df["position"] == "team") & ~df["league"].isin(INTERNATIONAL + EVENTS)]
     n = t.groupby(["teamid", "league"])["gameid"].nunique().reset_index()
-    return n.sort_values("gameid", ascending=False).drop_duplicates("teamid").set_index("teamid")["league"].to_dict()
+    # a tie (as many games in two leagues) goes to the first league by name, so the choice never depends on the row order
+    return (n.sort_values(["gameid", "league"], ascending=[False, True], kind="stable")
+            .drop_duplicates("teamid").set_index("teamid")["league"].to_dict())
 
 
 def check_events(df, leagues):
@@ -1352,7 +1398,7 @@ def team_rows(df, games, leagues, events, y):
     home = home_leagues(df)
     by_name = (df[(df["position"] == "team") & ~df["league"].isin(INTERNATIONAL + EVENTS)]
                .groupby(["teamname", "league"])["gameid"].nunique().reset_index()
-               .sort_values("gameid", ascending=False).drop_duplicates("teamname").set_index("teamname")["league"])
+               .sort_values(["gameid", "league"], ascending=[False, True], kind="stable").drop_duplicates("teamname").set_index("teamname")["league"])
     t["home"] = [home.get(k) if not k.startswith("name:") else by_name.get(n) for k, n in zip(t["key"], t["teamname"])]
     t["home"] = t["home"].where(t["home"].notna(), t["league"])
     major_events = {lg for lg, c in t[t["kind"] == "event"].groupby("league") if any(tier_of(h) in ("major", "tier1") for h in c["home"])}
@@ -1979,14 +2025,19 @@ def write_site_data(games, c_by_role, cfg, out_dir, leagues, complete, tg, team_
     # team index: name, home league (if on the site, else the league it played most here), team-games, files
     tl = tg.groupby("ti").agg(name=("team", "last"), home=("home", "last"), games=("ti", "size"),
                               most=("league", lambda s: s.mode().iloc[0]))
-    trow = [[r["name"], r["home"] if r["home"] in leagues else r["most"], int(r["games"]), tfiles[i]]
+    # the names a team played under, in order: [name, first year, last year] (only teams with more than one name)
+    nm = tg.assign(y=tg["date"].dt.year).groupby(["ti", "team"]).agg(first=("date", "min"), y0=("y", "min"), y1=("y", "max")).reset_index().sort_values("first")
+    names = {ti: [[r.team, int(r.y0), int(r.y1)] for r in g.itertuples()] for ti, g in nm.groupby("ti") if len(g) > 1}
+    trow = [[r["name"], r["home"] if r["home"] in leagues else r["most"], int(r["games"]), tfiles[i], names.get(i)]
             for i, r in tl.reindex(range(len(team_keys))).iterrows()]
 
     # the files lists as numbers: positions in file_keys (every "year/league" of the player and team files, by year)
     fkeys = sorted({k for fl in pfiles + tfiles for k in fl}, key=lambda k: (k[:4], k[5:]))
     fpos = {k: i for i, k in enumerate(fkeys)}
-    for r in prow + trow:
+    for r in prow:
         r[-1] = [fpos[k] for k in r[-1]]
+    for r in trow:
+        r[3] = [fpos[k] for k in r[3]]
 
     for f in ["site_data.json"]:                              # the single-file layout from before
         if os.path.exists(os.path.join(out_dir, f)):
@@ -2037,6 +2088,10 @@ def main(pattern=FILES, out_dir=OUT_DIR, show_report=False):
         print(f"===== {y}: {csv}")
         df = pd.read_csv(csv, low_memory=False)
         df["league"] = df["league"].replace(RENAME_LEAGUES)
+        df["teamid"] = df["teamid"].replace(TEAM_MERGE)
+        for k, v in TEAM_MERGE.items():
+            if k.startswith("name:"):
+                df.loc[df["teamid"].isna() & (df["teamname"] == k[5:]), "teamid"] = v
         clean_year(df)
         for lg, m in MERGE_SPLITS.items():
             sel = df["league"] == lg

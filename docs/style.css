@@ -3,7 +3,7 @@
 @font-face{font-family:"Barlow Condensed";font-style:normal;font-weight:700;font-display:swap;src:url(fonts/barlow-condensed-700-latin-ext.woff2) format("woff2");unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C4,U+2113,U+2C60-2C7F,U+A720-A7FF}
 @font-face{font-family:"Barlow Condensed";font-style:normal;font-weight:700;font-display:swap;src:url(fonts/barlow-condensed-700-latin.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
 
-:root{
+:root{--gold:#f2c14e;
   --bg:#0a0a0a;--card:#141414;--card2:#1f1f1f;--line:#2a2a2a;--fg:#f2f2f2;--mut:#a3a3a3;
   --ac:#22d3ee;--onac:#04222a;--acbg:rgba(34,211,238,.12);--band:rgba(34,211,238,.14);
   --good:#4cc27f;--bad:#ef7070;--avg:#c7c7c7;--goodbg:rgba(76,194,127,.16);--badbg:rgba(239,112,112,.16);
@@ -13,7 +13,7 @@
   --r1:8px;--r2:12px;--r3:16px;
   color-scheme:dark;
 }
-:root[data-theme="light"]{
+:root[data-theme="light"]{--gold:#9a6b00;
   --bg:#f5f5f5;--card:#fff;--card2:#f0f0f0;--line:#e0e0e0;--fg:#111;--mut:#555;
   --ac:#0e7490;--onac:#fff;--acbg:rgba(14,116,144,.10);--band:rgba(14,116,144,.12);
   --good:#1a8a4a;--bad:#c23b3b;--avg:#5c5c5c;--goodbg:rgba(26,138,74,.12);--badbg:rgba(194,59,59,.12);
@@ -181,7 +181,6 @@ a.hubc:hover{text-decoration:none;border-color:var(--ac)}.hubc.soon b{color:var(
 .tip{position:absolute;top:4px;pointer-events:none;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:12px;white-space:nowrap;box-shadow:var(--shadow);z-index:3}
 .cc{position:relative}
 .cc svg{display:block;width:100%;height:auto;touch-action:pan-y;overflow:visible}
-.cc .zg{fill:var(--good);opacity:.08}.cc .zb{fill:var(--bad);opacity:.08}
 .cc .gl{stroke:var(--line);stroke-width:1}.cc .gl.one{stroke:var(--mut);stroke-dasharray:6 4;stroke-width:1.5}
 .cc .ax{fill:var(--mut);font-size:12px}.cc .ax.one{font-weight:700}
 .cc .band{fill:var(--band)}.cc .ln{fill:none;stroke:var(--ac);stroke-width:3;stroke-linejoin:round}
@@ -273,3 +272,27 @@ footer{max-width:1200px;margin:0 auto;padding:20px 24px 36px;color:var(--mut);fo
   h1.mh{font-size:34px}
   footer{padding:20px 16px 32px}
 }
+
+/* bracket: columns of series (rounds), scrolls sideways inside its card on small screens */
+.brw{overflow-x:auto;margin:8px 0 14px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}
+.br{display:flex;gap:28px;min-width:max-content}
+.bc{display:flex;flex-direction:column;width:230px}
+.bh{font-family:var(--disp);text-transform:uppercase;font-size:15px;letter-spacing:.04em;color:var(--mut);margin-bottom:10px}
+.bm{flex:1;display:flex;flex-direction:column;justify-content:space-around;gap:12px}
+.bx{display:block;background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:6px 10px;color:var(--fg);text-decoration:none;position:relative}
+.bx:hover{border-color:var(--ac)}
+.bx.fin{border-color:var(--ac);box-shadow:0 0 0 1px var(--ac) inset}
+.bc+.bc .bx::before{content:"";position:absolute;left:-29px;top:50%;width:28px;border-top:1px solid var(--line)}
+.bd{display:block;font-size:11px;color:var(--mut);margin-bottom:2px}
+.bt{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:3px 0;color:var(--mut)}
+.bt span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bt b{font-variant-numeric:tabular-nums;min-width:14px;text-align:right}
+.bt.w{color:var(--fg);font-weight:700}.bt.w b{color:var(--ac)}
+
+/* Worlds titles: gold trophy and count next to a player's name */
+.wt{display:inline-flex;align-items:center;gap:2px;margin-left:4px;color:var(--gold);font-weight:700;font-size:12px;white-space:nowrap;vertical-align:1px;font-variant-numeric:tabular-nums}
+.wt svg{width:14px;height:14px;fill:currentColor}
+h1 .wt{font-size:.45em;gap:4px;margin-left:12px;vertical-align:.35em}h1 .wt svg{width:1em;height:1em}
+
+/* team page: name filter next to the other filters */
+.tfw{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end}.tnf select{min-width:180px}
