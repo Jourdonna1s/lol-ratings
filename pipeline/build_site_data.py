@@ -465,6 +465,18 @@ PLAYER_FIELDS = ["name", "role", "team", "league", "games", "files"]   # files: 
 TEAM_FIELDS = ["team", "ti", "date", "league", "kind", "stage", "period", "split", "opponent", "oi", "side", "result", "game",
                "series", "s_result", "minutes", "kills", "deaths", "fb", "fd", "fh", "ft", "dragons", "grubs", "barons", "towers",
                "inhibs", "gd15", "csd15", "xpd15", "dpm", "wpm", "vspm", "picks", "bans", "elo_before", "elo_after", "gn"]
+# stats/<year>/<league>.json: the stats behind each game rating, for the player and match pages (display only, never
+# used by the ratings); same row order as games/<year>/<league>.json. STAT_SRC: field -> rating_core column.
+STAT_SRC = {"gd10": "golddiffat10", "xpd15": "xpdiffat15", "csd15": "csdiffat15", "kp15": "kp15", "fb": "fb_score",
+            "obj": "obj_early", "kp": "late_kp", "ks": "late_killshare", "ds": "late_deathshare", "dmg": "damageshare",
+            "tank": "tank_share", "twr": "towerdmg_pm", "wpm": "wpm", "wcpm": "wcpm", "cwpm": "cwpm", "swing": "gold_prog"}
+STAT_ROUND = {"gd10": 0, "xpd15": 0, "csd15": 1, "twr": 0, "swing": 0, "fb": 1, "wpm": 2, "wcpm": 2, "cwpm": 2, "exp_gd15": 0}
+STAT_PCT = ["kp15", "obj", "kp", "ks", "ds", "dmg", "tank"]   # shares, written as whole percentages (smaller files)
+# usual values from the data (not weights): the lane matchup's usual gold@15 lead, the champion's usual damage share
+# offset from the role; and the five rating parts as bands -2..2 (well below .. well above, by rank in role and baseline)
+PARTS = {"b_early": "early", "b_fights": "lg_fights", "b_swing": "lg_swing", "b_vision": "lg_vision", "b_pressure": "lg_pressure"}
+STAT_FIELDS = list(STAT_SRC) + ["exp_gd15", "dmg_off"] + list(PARTS)
+AVG_STATS = ["gd15", "cs", "dpm", "vspm"] + [f for f in STAT_SRC if f != "fb"]   # stats with role averages (fb: a score, not shown)
 TEAM_SUMMARY_FIELDS = ["team", "league", "kind", "period", "split", "stage", "games", "wins", "s_won", "s_lost",
                        "gd_n", "gd_sum", "blue_games", "blue_wins", "first", "last", "elo"]
 TEAM_INDEX_FIELDS = ["name", "league", "games", "files", "names"]
@@ -1297,6 +1309,16 @@ def tidy(p, kind):
         "r_early": p["r_early"], "r_late": p["r_late"], "r_overall": p["r_overall"],
         "playerid": p["playerid"], "baseline": p["baseline"],
     })
+    nan = pd.Series(np.nan, index=p.index)
+    col = lambda c: p[c] if c in p.columns else nan
+    for f, c in STAT_SRC.items():
+        out[f] = col(c).to_numpy()
+    out.loc[p["position"].to_numpy() != "jng", "obj"] = np.nan
+    out.loc[p["position"].to_numpy() != "sup", "kp15"] = np.nan
+    out["exp_gd15"] = (col("golddiffat15") - col("adj_golddiffat15")).where(p["position"].isin(["top", "mid", "bot"])).to_numpy()
+    out["dmg_off"] = (col("damageshare") - col("adj_damageshare")).to_numpy()
+    for f, c in PARTS.items():
+        out["_" + f] = col(c).to_numpy()
     out["year"] = out["date"].dt.year
     return out
 
@@ -1919,6 +1941,15 @@ def league_spread(games, c_by_role):
     return f
 
 
+def part_bands(games):
+    """The five rating parts as bands for the site (-2 well below, -1 below, 0 average, 1 above, 2 well above average),
+    by rank within role and baseline, so the site never shows the parts' values or weights."""
+    for f in PARTS:
+        q = games.groupby(["baseline", "role"])["_" + f].rank(pct=True)
+        games[f] = pd.cut(q, [0, .1, .3, .7, .9, 1.0001], labels=[-2, -1, 0, 1, 2], include_lowest=True).astype(float)
+        games.drop(columns="_" + f, inplace=True)
+
+
 def default_table(games, c_by_role, leagues):
     """Per-player table (all games, domestic, international) for players_default_view.csv and the report."""
     dom_t = rate_players(games[games["kind"] == "domestic"], c_by_role).add_prefix("dom_").rename(columns={"dom_player": "player", "dom_role": "role"})
@@ -1984,11 +2015,61 @@ def dump(path, obj):
         json.dump(obj, f, ensure_ascii=False, default=str, separators=(",", ":"))
 
 
+def stat_averages(gy):
+    """Role averages of the stats per baseline (a league, the shared main group, or international) for one year:
+    {baseline: {role: {stat: [mean, 5%, 10%, .., 95% of player averages]}}}, from players with MIN_GAMES_CALIBRATION+
+    games there (fewer when the baseline has under 10 such players in a role). Events are left out (their teams play
+    against other leagues)."""
+    out = {}
+    g = gy[gy["kind"] != "event"]
+    for (base, role), q in g.groupby(["baseline", "role"]):
+        pa = q.groupby("pi")[AVG_STATS].agg(lambda v: v.astype(float).mean()).join(q.groupby("pi").size().rename("n"))
+        for mn in (MIN_GAMES_CALIBRATION, 5, 1):
+            sel = pa[pa["n"] >= mn]
+            if len(sel) >= 10:
+                break
+        d = {}
+        for st in AVG_STATS:
+            v = sel[st].dropna()
+            if len(v) >= 5:
+                r = 0 if st in ("gd15", "cs", "dpm", "gd10", "xpd15", "twr", "swing") else 1 if st in ["csd15"] + STAT_PCT else 2
+                d[st] = [round(float(x), r) for x in [v.mean()] + list(v.quantile(np.arange(.05, .951, .05)))]
+        out.setdefault(base, {})[role] = d
+    return out
+
+
+def recent_series(tg, n=12):
+    """The latest n series of the major leagues and international events, for the home page: [league, date of the
+    first game, ti, oi, wins ti, wins oi, k] (k: the k-th series of the same league, day and teams, for -k addresses)."""
+    t = tg.reset_index(drop=True)
+    t = t[(t["year"] == t["year"].max()) | (t["year"] == t["year"].max() - 1)]
+    first = t.groupby("series", sort=False).head(1)               # rows are in date order: the series' first game
+    wins = t.groupby(["series", "ti"])["result"].sum()
+    rows, seen = [], {}
+    for _, r in first.iterrows():
+        k = (r["year"], r["league"], r["date"].strftime("%Y-%m-%d"), frozenset((r["ti"], r["oi"])))
+        seen[k] = seen.get(k, 0) + 1
+        if r["kind"] == "international" or (r["kind"] == "domestic" and tier_of(r["league"], int(r["year"])) == "major"):
+            rows.append([r["league"], k[2], int(r["ti"]), int(r["oi"]), int(wins.get((r["series"], r["ti"]), 0)),
+                         int(wins.get((r["series"], r["oi"]), 0)), seen[k], r["date"]])
+    rows.sort(key=lambda x: x[7])
+    return [x[:7] for x in rows[-n:][::-1]]
+
+
 def write_site_data(games, c_by_role, cfg, out_dir, leagues, complete, tg, team_keys, elo_report, tours, links, raw):
     """Writes index.json, summary/<year>.json, games/<year>/<league>.json and teams/<year>/<league>.json."""
     sg = tg.drop_duplicates("gameid").set_index("gameid")
     games = games.assign(series=games["gameid"].map(sg["series"]), gn=games["gameid"].map(sg["gn"]))
-    g_out = games[GAME_FIELDS + ["year", "playerid", "gameid"]].copy()
+    g_out = games[GAME_FIELDS + ["year", "playerid", "gameid", "baseline"] + STAT_FIELDS].copy()
+    for f in STAT_FIELDS:
+        if f in STAT_PCT:
+            g_out[f] = (g_out[f] * 100).round(0)
+        elif f == "dmg_off":
+            g_out[f] = (g_out[f] * 100).round(1)
+        else:
+            g_out[f] = g_out[f].round(STAT_ROUND.get(f, 0))
+        if (g_out[f].dropna() % 1 == 0).all():
+            g_out[f] = g_out[f].astype("Int64")             # whole numbers without ".0"
     # which team (index into the team list) each player-game belongs to
     ti_of = dict(zip(zip(tg["gameid"], tg["team"]), tg["ti"]))
     g_out["ti"] = [ti_of.get(k, -1) for k in zip(g_out["gameid"], g_out["team"])]
@@ -2037,12 +2118,13 @@ def write_site_data(games, c_by_role, cfg, out_dir, leagues, complete, tg, team_
     for y in years:
         gy = g_out[g_out["year"] == y].reset_index(drop=True)
         gy["seq"] = np.arange(len(gy))                       # position in the year's date order, used to merge files
-        for f in glob.glob(os.path.join(out_dir, "games", str(y), "*.json")):
+        for f in glob.glob(os.path.join(out_dir, "games", str(y), "*.json")) + glob.glob(os.path.join(out_dir, "stats", str(y), "*.json")):
             os.remove(f)                                      # drop league files that are no longer produced
         for lg, part in gy.groupby("league", sort=False):
             key = f"{y}/{lg}"
             dump(os.path.join(out_dir, "games", str(y), f"{lg}.json"),
                  {"fields": game_fields, "rows": rows_of(part[game_fields]), "seq": part["seq"].tolist()})
+            dump(os.path.join(out_dir, "stats", str(y), f"{lg}.json"), {"fields": STAT_FIELDS, "rows": rows_of(part[STAT_FIELDS])})
             files[key] = {"rows": int(len(part)), "kinds": sorted(part["kind"].unique().tolist())}
             for i in dict.fromkeys(part["pi"]):
                 pfiles[i].append(key)
@@ -2083,7 +2165,8 @@ def write_site_data(games, c_by_role, cfg, out_dir, leagues, complete, tg, team_
         ts["elo"] = ty["elo_after"].to_numpy()[ts["last"].to_numpy()]
         ts = ts.rename(columns={"ti": "team"}).sort_values("first")
         dump(os.path.join(out_dir, "summary", f"{y}.json"), {"fields": SUMMARY_FIELDS, "rows": rows_of(s[SUMMARY_FIELDS]),
-                                                             "teams": {"fields": TEAM_SUMMARY_FIELDS, "rows": rows_of(ts[TEAM_SUMMARY_FIELDS])}})
+                                                             "teams": {"fields": TEAM_SUMMARY_FIELDS, "rows": rows_of(ts[TEAM_SUMMARY_FIELDS])},
+                                                             "averages": stat_averages(gy)})
 
     # player index: last team, league of the last domestic game (else last game), games, files
     last = g_out.groupby("pi").tail(1).set_index("pi")
@@ -2137,6 +2220,7 @@ def write_site_data(games, c_by_role, cfg, out_dir, leagues, complete, tg, team_
         "players": {"fields": PLAYER_FIELDS, "rows": prow},
         "team_fields": TEAM_FIELDS, "team_summary_fields": TEAM_SUMMARY_FIELDS,
         "teams": {"fields": TEAM_INDEX_FIELDS, "rows": trow},
+        "recent": recent_series(tg),
         "tournaments": {"fields": TOUR_FIELDS, "rows": rows_of(tours[TOUR_FIELDS])}, "tournament_links": links,
         "awards": {"fields": AWARD_FIELDS, "rows": awards(g_out, tg, tours, raw, c_by_role)},
         # Elo: what the site shows (no tuning values: the site explains concepts only)
@@ -2177,6 +2261,7 @@ def main(pattern=FILES, out_dir=OUT_DIR, show_report=False):
         print("splits per league:"); split_table(games)
         c_y = calibrate_c(games)
         f_lg = games["baseline"].map(league_spread(games, c_y)).fillna(1.0)   # same spread in every league
+        part_bands(games)
         for c in ["r_early", "r_late", "r_overall"]:
             games[c] = 1 + (games[c] - 1) * f_lg
         if c_ref is None:
