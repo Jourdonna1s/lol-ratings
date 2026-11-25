@@ -1,5 +1,5 @@
 """
-Builds the data the website reads (docs/data/), rating v0.2.
+Builds the data the website reads (docs/data/), rating v0.3.
 
     python build_site_data.py                 # every year's file in this folder, writes ../docs/data
     python build_site_data.py --csv FILE --out DIR --report
@@ -1196,6 +1196,7 @@ def rate_baselines(df, cfg):
             if n < 10:
                 print(f"{label}: {lg} has only {n} complete games, skipped"); continue
             p = rc.add_raw_stats(p)
+            rc.apply_adjustments(p, state["adj"], cfg)
             p["qualifier"] = bool(qualifiers)
             parts.append(p)
             if not quiet:
@@ -1204,6 +1205,21 @@ def rate_baselines(df, cfg):
 
     leagues = regular_leagues(df)
     check_events(df, leagues)
+    # corrections (kill gold, champion style, lane matchups, gold champions): fitted on a fixed set of games, the
+    # year's first baseline group (the main leagues) and the international games, so adding leagues never changes them
+    state = {"adj": None}
+    fit_on = [lg for lg in list(BASELINE_GROUPS.values())[0] if lg in leagues] + INTERNATIONAL
+    ref = pool(fit_on, "adjustments", qualifiers=False, quiet=True)
+    if ref is not None:
+        state["adj"] = rc.fit_adjustments(ref, cfg)
+        kill, champ = rc.adjustment_report(state["adj"], cfg)
+        print(f"corrections fitted on {ref['gameid'].nunique()} games")
+        if len(kill):
+            print("gold at 15 per kill/assist/death (own - lane opponent):")
+            print(kill[kill["stat"] == "golddiffat15"].round(0).to_string(index=False))
+        if len(champ):
+            print("gold champions (extra gold lead, gold swing per minute):")
+            print(champ.round(1).to_string(index=False))
     parts, base_raw = [], {}
     for name, lgs in baselines(leagues).items():
         raw = pool(lgs, name, quiet=True)
@@ -2097,7 +2113,9 @@ def write_site_data(games, c_by_role, cfg, out_dir, leagues, complete, tg, team_
                    "baselines": "each league its own baseline, except the leagues in baseline_groups, which share one; international games: their own baseline; events and qualifiers of international events: the baseline of each team's home league, weight 1, not counted as international",
                    "formula": "rating = 1 + c(role) * sum(w * (game_rating - 1)) / (sum(w) + K)",
                    "early_weights": cfg["EARLY_WEIGHTS"], "late_groups": cfg["LATE_GROUPS"],
-                   "late_weights": cfg["LATE_WEIGHTS"], "early_share": cfg["EARLY_SHARE"]},
+                   "late_weights": cfg["LATE_WEIGHTS"], "early_share": cfg["EARLY_SHARE"],
+                   "tank_roles": cfg["TANK_ROLES"], "gold_champs": cfg["GOLD_CHAMPS"],
+                   "corrections": "fitted per year on the main leagues and international games: style stats against the champion's average in the role; lane leads against the champion matchup; the gold champions' extra gold"},
         "years": years, "files": files, "file_keys": fkeys, "game_fields": game_fields, "summary_fields": SUMMARY_FIELDS,
         "players": {"fields": PLAYER_FIELDS, "rows": prow},
         "team_fields": TEAM_FIELDS, "team_summary_fields": TEAM_SUMMARY_FIELDS,
