@@ -53,8 +53,8 @@ const unfiltered=f=>{const s={split:st.split,stage:st.stage,[YK]:st[YK]};st.spli
 // summary rows: one per player x team x league x split x stage, holding the sums rateSums() needs.
 // They are shaped like game rows (same F positions for league, kind, period, split, stage, team, date=year) so keep() works on both.
 // The summary files are loaded per year when a page needs that year (ensureYears); the latest year at the start.
-const SUM=[],TS=[],SLOADED=new Set();
-function addSummary(f,yi){SLOADED.add(YEARS[yi]);const S={};f.fields.forEach((k,i)=>S[k]=i);
+const SUM=[],TS=[],SLOADED=new Set(),AVG={};   // AVG: role averages of the stats per year (summary "averages")
+function addSummary(f,yi){SLOADED.add(YEARS[yi]);AVG[YEARS[yi]]=f.averages||{};const S={};f.fields.forEach((k,i)=>S[k]=i);
   for(const r of f.rows){const c=[];for(const k of ['league','kind','period','split','stage','team'])c[F[k]]=r[S[k]];c[F.date]=YEARS[yi];
     c.pi=r[S.player];c.ti=S.ti!=null?r[S.ti]:null;c.games=r[S.games];c.sums={n:r[S.n],sw:r[S.sw],swd:r[S.swd],sw2:r[S.sw2],s1:r[S.s1],s2:r[S.s2]};
     c.first=ORD(yi,r[S.first]);c.last=ORD(yi,r[S.last]);SUM.push(c)}
@@ -161,7 +161,53 @@ const dates=e=>dm(e.first)+(e.last!=e.first?' – '+dm(e.last):'');
 const teamOf=(name,ti,lg)=>ti!=null&&teams[ti]?teams[ti]:(byName[name]||[]).find(t=>t.league==lg)||(byName[name]||[])[0];
 const tlink=(name,ti,lg)=>{const t=teamOf(name,ti,lg);return t?`<a href="#${t.slug}">${esc(name)}</a>`:esc(name||'—')};
 const files={},tfiles={};
-const loadFile=k=>files[k]||(files[k]=getJSON(`data/games/${k}.json`).catch(e=>{delete files[k];throw e}));
+// a games file with its stats file (stats/<year>/<league>.json, same row order): each game row gets its stats in .st
+const SX={};
+const loadFile=k=>files[k]||(files[k]=Promise.all([getJSON(`data/games/${k}.json`),getJSON(`data/stats/${k}.json`).catch(()=>null)])
+  .then(([f,s])=>{if(s){s.fields.forEach((x,i)=>SX[x]=i);f.rows.forEach((r,j)=>r.st=s.rows[j])}return f}).catch(e=>{delete files[k];throw e}));
+// the stats behind the ratings, shown against the role average (concepts only: no weights). [key, label, format, direction
+// (1 higher is better, -1 lower is better, 0 neither), role only]
+const STATS=[
+  ['Early game',[['gd10','Gold lead at 10 min','sgn',1],['gd15','Gold lead at 15 min','sgn',1],['xpd15','XP lead at 15 min','sgn',1],['csd15','CS lead at 15 min','sgn1',1],
+    ['kp15','Early kill participation','pct',1,'sup'],['obj','Early objectives (dragon, Herald, void grubs)','pct',1,'jng']]],
+  ['Fights',[['kp','Kill participation','pct',1],['ks','Share of the team’s kills','pct',1],['ds','Share of the team’s deaths','pct',-1],
+    ['dmg','Share of the team’s damage','pct',1],['dpm','Damage per minute','int',1],['tank','Share of damage taken and mitigated','pct',0]]],
+  ['Gold',[['swing','Gold lead change per minute after laning','sgn',1],['cs','CS per game','int',0]]],
+  ['Vision',[['vspm','Vision score per minute','d2',1],['wpm','Wards placed per minute','d2',1],['wcpm','Wards cleared per minute','d2',1],['cwpm','Control wards per minute','d2',1]]],
+  ['Pressure',[['twr','Damage to towers per minute','int',1]]]];
+const PARTS=[['b_early','Early game'],['b_fights','Fights'],['b_swing','Gold swing'],['b_vision','Vision'],['b_pressure','Pressure']];
+const IN_GAME=new Set(['gd15','cs','dpm','vspm']);
+const sv=(g,k)=>{const v=IN_GAME.has(k)?g[F[k]]:g.st&&SX[k]!=null?g.st[SX[k]]:null;return v==null?null:v};
+const svMean=(gs,k)=>{let a=0,n=0;for(const g of gs){const v=sv(g,k);if(v!=null){a+=v;n++}}return n?a/n:null};
+const sfmt=(f,v)=>v==null?'—':f=='pct'?Math.round(v)+'%':f=='sgn'?(v>0?'+':'')+Math.round(v):f=='sgn1'?(v>0?'+':'')+v.toFixed(1):f=='d2'?v.toFixed(2):Math.round(v).toLocaleString('en-GB');
+// the baseline a game is compared in: the league (or its shared group), international games their own; events none
+function baseOf(g){const k=g[F.kind];if(k=='international')return'international';if(k=='event')return null;
+  const y=yr(g),gr=(C.baseline_groups_by_year||{})[y]||C.baseline_groups||{};for(const n in gr)if(gr[n].includes(g[F.league]))return n;return g[F.league]}
+function baseName(b,y){if(b=='international')return'International '+y;const gr=(C.baseline_groups_by_year||{})[y]||{};
+  return(b=='main'?'Major leagues':gr[b]?gr[b].join(', '):b)+' '+y}
+// the most played baseline x year of a set of games
+function basisOf(gs){const c=new Map();for(const g of gs){const b=baseOf(g);if(b){const k=yr(g)+'|'+b;c.set(k,(c.get(k)||0)+1)}}
+  if(!c.size)return null;const[y,b]=[...c.entries()].sort((a,b)=>b[1]-a[1])[0][0].split('|');return{y,b}}
+// percentile of a value among the role's players: from the averages' 5%..95% points
+function pctOf(q,v){if(!q||v==null)return null;const p=q.slice(1);if(v<=p[0])return 3;if(v>=p[18])return 97;
+  for(let i=0;i<18;i++)if(v<=p[i+1])return 5*(i+1)+5*(p[i+1]==p[i]?0:(v-p[i])/(p[i+1]-p[i]));return 97}
+const BAND=['well below average','below average','average','above average','well above average'];
+const bandWord=m=>m==null?'—':BAND[m>=.75?4:m>=.25?3:m>-.25?2:m>-.75?1:0];
+const bandBar=m=>m==null?'':`<span class="pbar mid"><i style="left:${Math.round((m+2)*25)}%"></i></span>`;
+// stats table: the player's (or a game's) values next to the role average; percentile bars for player averages
+function statsTable(gs,role,basis,perGame){
+  const A=basis&&((AVG[basis.y]||{})[basis.b]||{})[role]||{};
+  const rows=STATS.map(([grp,list])=>{const r=list.filter(x=>!x[4]||x[4]==role).map(([k,lab,f,dir])=>{const v=svMean(gs,k);if(v==null)return'';const q=A[k],av=q?q[0]:null;
+      let bar='';if(q&&!perGame){const p=pctOf(q,v),b=dir<0?100-p:p;bar=`<span class="pbar"><i style="left:${Math.round(p)}%"></i></span><span class="mut sm"><span class="pw">${dir?'better than':'more than'} </span>${Math.round(dir?b:p)}%</span>`}
+      else if(q&&perGame&&dir){const d=(v-av)*dir,sc=Math.abs((q[17]-q[3])||1);bar=Math.abs(d)<sc*.15?'<span class="mut sm">about average</span>':`<span class="${d>0?'good':'bad'} sm">${d>0?'▲ better':'▼ worse'} than average</span>`}
+      return`<tr><td>${lab}${bar?`<div class="pm">${bar}</div>`:''}</td><td><b>${sfmt(f,v)}</b></td><td class="mut">${sfmt(f,av)}</td><td class="pcell">${bar}</td></tr>`}).join('');
+    return r?`<tr class="subh"><th colspan="4">${grp}</th></tr>`+r:''}).join('');
+  return rows?`<div class="tw"><table class="stt"><tr><th>Stat</th><th>${perGame?'This game':'Per game'}</th><th>Average</th><th class="pcell"></th></tr>${rows}</table></div>`:'';
+}
+function partsBlock(gs){
+  const r=PARTS.map(([k,lab])=>{const m=svMean(gs,k);return m==null?'':`<div class="part"><span>${lab}</span>${bandBar(m)}<span class="mut sm">${bandWord(m)}</span></div>`}).join('');
+  return r?`<div class="parts">${r}</div>`:'';
+}
 async function gamesOf(p){
   if(p.games)return p.games;
   const fs=await Promise.all(p.files.map(loadFile)),rows=[];
@@ -402,6 +448,7 @@ function home(){
   const big=e=>e.kind=='international'||e.tier=='major',newest=(a,b)=>b.last.localeCompare(a.last);
   const live=TOURS.filter(e=>big(e)&&!e.done&&String(e.year)==LAST_YEAR).sort(newest).slice(0,3);
   const won=TOURS.filter(e=>big(e)&&e.champ!=null&&teams[e.champ]).sort(newest).slice(0,8);
+  const recent=(D.recent||[]).filter(r=>teams[r[2]]&&teams[r[3]]);
   const until=D.data_until?new Date(D.data_until+'T12:00:00Z').toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric',timeZone:'UTC'}):'';
   const emax=Math.max(...top.map(a=>a.elo)),emin=Math.min(...top.map(a=>a.elo))-100;
   const k=n=>n>=10000?(n/1000).toFixed(1).replace(/\.0$/,'')+'k':n.toLocaleString('en-GB');
@@ -424,6 +471,10 @@ function home(){
       <div class="tw"><table class="lbt">${won.map(e=>`<tr><td class="mut sm">${dm(e.last)}</td><td class="pl"><a href="#${e.slug}">${esc(e.short)}</a> <span class="mut sm">${e.year}</span></td><td style="text-align:right"><span class="champ">${tlink(teams[e.champ].name,e.champ)}</span></td></tr>`).join('')}</table></div>
       <p class="mut sm">Major leagues and international events.</p></div>
   </div>
+  ${recent.length?`<div class="panel"><div class="phd"><h2>Recent matches</h2><a href="#events">All tournaments →</a></div>
+    <div class="tw"><table class="lbt">${recent.map(([lg,d,a,b,wa,wb,k])=>{const h=`#m-${lgs(lg)}-${d}-${mpair(teams[a].slug.slice(2),teams[b].slug.slice(2))}${k>1?'-'+k:''}`;
+      return`<tr data-href="${h}"><td class="mut sm">${dm(d)}</td><td class="pl"><span class="${wa<wb?'mut':''}">${tlink(teams[a].name,a)}</span> <a href="${h}"><b>${wa}–${wb}</b></a> <span class="${wb<wa?'mut':''}">${tlink(teams[b].name,b)}</span></td><td class="mut sm hm">${esc(NAME(lg))}</td></tr>`}).join('')}</table></div>
+    <p class="mut sm">Major leagues and international events. Click a match for its games, players and stats.</p></div>`:''}
   <p class="mut sm">${esc(ELO_NOTE)}</p>`;
   wireSearch();
 }
@@ -537,13 +588,20 @@ function playerPage(p){
   ${av('dpm')!=null?stat('Damage per min',Math.round(av('dpm'))):''}${av('cs')!=null?stat('CS per game',Math.round(av('cs'))):''}${av('vspm')!=null?stat('Vision per min',av('vspm').toFixed(2)):''}</div></div>`;
   const champP=`<div class="panel"><h2>Champions</h2><div class="tw"><table class="lbt"><tr><th>Champion</th><th>Games</th><th>Win rate</th><th>KDA</th><th>Rating</th></tr>
   ${champs.map(([c,v])=>{const r=rate(v.gs,F.r_overall);return`<tr><td>${champ(c)}</td><td>${v.n}</td><td>${(100*v.w/v.n).toFixed(0)}%</td><td>${((v.k+v.a)/Math.max(v.d,1)).toFixed(2)}</td><td class="${r?rc(r.x):'mut'}"><b>${r?f2(r.x):'—'}</b></td></tr>`}).join('')}</table></div></div>`;
+  // stats behind the rating, against the role average of the most played league in the selection
+  const basis=basisOf(gs),hasSt=gs.some(g=>g.st);
+  if(hasSt&&basis&&!SLOADED.has(basis.y))ensureYears([basis.y]).then(()=>{if(location.hash=='#'+p.slug)playerPage(p)},()=>{});
+  const behind=hasSt?`<div class="panel"><div class="phd"><h2>Stats behind the rating</h2><span class="mut sm">vs ${basis?esc(baseName(basis.b,basis.y)):'—'}</span></div>
+    ${partsBlock(gs)}${statsTable(gs,p.role,basis)}
+    <p class="mut sm">Per-game averages in the selection next to the average ${esc((RL[p.role]||p.role).toLowerCase())} in ${basis?esc(baseName(basis.b,basis.y)):'the league'} (players with enough games); the bar shows where this player stands among them. The parts at the top say in words how each part of the player’s games compares with the role. Performance relative to the games counted, not skill.</p></div>`:'';
   app.innerHTML=top+`
   <div class="cards">${card('Overall rating · '+esc(selection(st.plg)),o,1)}${card('Domestic',d)}${card('International',i)}${card('Early game',e)}${card('Late game',l)}</div>
   <p class="mut sm pnote">Ranges show the likely rating given the games so far. Overall counts international games more than league games${p.games.some(g=>g[F.kind]=='event')?'; events and qualifiers count like league games (they are not in the International rating)':''}. Performance ratings relative to the games counted, not skill.</p></section>
   <div class="cols">${left?`<div>${left}</div><div>${statsP}${champP}</div>`:`<div>${champP}</div><div>${statsP}</div>`}</div>
+  ${behind}
   ${cabinet(AWP[p.i]||[])}
   <h2>Games</h2><div class="tw"><table><tr><th>Date</th><th>Rating</th><th></th><th>vs</th><th>Champion</th><th>K/D/A</th><th>GD@15</th><th>Event</th></tr>
-  ${shown.map(g=>`<tr><td>${mlink(phref(p,g),g[F.date])}</td><td class="${rc(g[F.r_overall])}"><b>${f2(g[F.r_overall])}</b></td><td><span class="res ${g[F.result]?'good':'bad'}">${g[F.result]?'W':'L'}</span></td><td>${g[F.opponent]?tlink(g[F.opponent],null,g[F.league]):'—'}</td><td>${champ(g[F.champion])}</td><td>${g[F.kills]}/${g[F.deaths]}/${g[F.assists]}</td><td class="${g[F.gd15]==null?'':g[F.gd15]>=0?'good':'bad'}">${g[F.gd15]==null?'—':Math.round(g[F.gd15])}</td><td>${elink(g,ev(g))}</td></tr>`).join('')}</table></div>
+  ${shown.map(g=>{const h=phref(p,g),hg=h&&g[F.gn]!=null?h+'/g'+g[F.gn]:h;return`<tr${hg?` data-href="${hg}"`:''}><td>${mlink(hg,g[F.date])}</td><td class="${rc(g[F.r_overall])}"><b>${f2(g[F.r_overall])}</b></td><td><span class="res ${g[F.result]?'good':'bad'}">${g[F.result]?'W':'L'}</span></td><td>${g[F.opponent]?tlink(g[F.opponent],null,g[F.league]):'—'}</td><td>${champ(g[F.champion])}</td><td>${g[F.kills]}/${g[F.deaths]}/${g[F.assists]}</td><td class="${g[F.gd15]==null?'':g[F.gd15]>=0?'good':'bad'}">${g[F.gd15]==null?'—':Math.round(g[F.gd15])}</td><td>${elink(g,ev(g))}</td></tr>`}).join('')}</table></div>
   ${!st.pg&&rec.length>20?`<button class="more" id="mg">Show all ${rec.length}</button>`:''}`;
   bar();wireSearch();wireCab();
   if(chartOn)careerChart(document.getElementById('cc'),cr,y=>{st.pyear=y;redraw()},p.name);
@@ -725,6 +783,13 @@ function teamPage(t){
   const rec=gs.slice().reverse(),shown=st.tpg?rec:rec.slice(0,20);
   const fin=new Map();(TITLES[t.i]||[]).forEach(([c,d,b])=>{const g=rec.find(g=>g.r[TF.date]==d&&c.startsWith(g.r[TF.league]));if(g)fin.set(g,b)});
   const ev=r=>r[TF.league]+(r[TF.split]||r[TF.period]?' '+esc(SPN(r[TF.league],r[TF.split])||r[TF.period]):'')+(r[TF.stage]=='playoffs'?' (playoffs)':'');
+  // matches: the team's series in the selection, newest first (score, opponent, event); a row opens the match page
+  const SM=new Map();for(const g of gs){const r=g.r,k=fileKey(r[TF.date],r[TF.league])+'|'+r[TF.series];let m=SM.get(k);
+    if(!m)SM.set(k,m={g,r0:r,w:0,l:0,h:mhref(fileKey(r[TF.date],r[TF.league]),r[TF.series])});r[TF.result]?m.w++:m.l++}
+  const ms=[...SM.values()].reverse(),msShown=st.tms?ms:ms.slice(0,10);
+  const matchesP=ms.length?`<h2>Matches</h2><div class="tw"><table class="lbt"><tr><th>Date</th><th>Result</th><th>vs</th><th>Event</th></tr>
+  ${msShown.map(m=>`<tr${m.h?` data-href="${m.h}"`:''}><td>${mlink(m.h,m.r0[TF.date])}</td><td><span class="res ${m.w>m.l?'good':m.w<m.l?'bad':''}">${m.w>m.l?'W':m.w<m.l?'L':'D'}</span> <b>${m.w}–${m.l}</b></td><td>${tlink(m.r0[TF.opponent],m.r0[TF.oi])}</td><td>${elink(m.g,ev(m.r0))}</td></tr>`).join('')}</table></div>
+  ${!st.tms&&ms.length>10?`<button class="more" id="ms">Show all ${ms.length} matches</button>`:''}`:'';
   const card=(l,v,s,big)=>`<div class="card ${big?'main':''}"><div class="mut sm">${l}</div><div class="${big?'num':'num2 nw'}">${v}</div><div class="mut sm">${s}</div></div>`;
   app.innerHTML=head+`
   <div class="cards">${card('Elo after last game · '+esc(selection(st.tlg)),Math.round(e1),`<span class="${dE>=0?'good':'bad'}">${dE>=0?'+':''}${Math.round(dE)}</span> over ${n} games`,1)}
@@ -744,12 +809,14 @@ function teamPage(t){
   <h2>Stats vs ${esc(LN(CL))} average</h2><div class="tw"><table><tr><th>Stat</th><th>${esc(t.name)}</th><th>${esc(LN(CL))} average</th><th>Rank</th></tr>${srows}</table></div>
   <p class="mut sm">Per game. Rank among the ${nT} teams in ${esc(selection(CL))}. @15 stats only from games with full stats.</p>
   <h2>Draft</h2><div class="draft">${dl('Most picked · win %',picks,1)}${dl('Most banned by them',bans)}${dl('Most banned against them',bansVs)}</div>
+  ${matchesP}
   <h2>Games</h2><div class="tw"><table><tr><th>Date</th><th></th><th>vs</th><th>Side</th><th>Length</th><th>K-D</th><th>GD@15</th><th>Drg / Bar / Tow</th><th>Elo</th><th>Event</th></tr>
-  ${shown.map(g=>{const r=g.r,dx=r[TF.elo_after]-r[TF.elo_before];return`<tr><td>${mlink(mhref(fileKey(r[TF.date],r[TF.league]),r[TF.series]),r[TF.date])}</td><td><span class="res ${r[TF.result]?'good':'bad'}">${r[TF.result]?'W':'L'}</span></td><td>${tlink(r[TF.opponent],r[TF.oi])}</td><td>${r[TF.side]}</td><td>${r[TF.minutes]==null?'—':r[TF.minutes].toFixed(1)}</td><td>${r[TF.kills]??'—'}-${r[TF.deaths]??'—'}</td><td>${r[TF.gd15]==null?'—':Math.round(r[TF.gd15])}</td><td>${r[TF.dragons]??'—'} / ${r[TF.barons]??'—'} / ${r[TF.towers]??'—'}</td><td>${Math.round(r[TF.elo_after])}${Math.round(dx)?` <span class="${dx>0?'good':'bad'} sm">${dx>0?'+':''}${Math.round(dx)}</span>`:''}</td><td>${elink(g,ev(r))}${fin.has(g)?` · <b>title</b> <span class="mut sm">(+${fin.get(g)} included)</span>`:''}</td></tr>`}).join('')}</table></div>
+  ${shown.map(g=>{const r=g.r,dx=r[TF.elo_after]-r[TF.elo_before],h=mhref(fileKey(r[TF.date],r[TF.league]),r[TF.series]),hg=h&&r[TF.gn]!=null?h+'/g'+r[TF.gn]:h;return`<tr${hg?` data-href="${hg}"`:''}><td>${mlink(hg,r[TF.date])}</td><td><span class="res ${r[TF.result]?'good':'bad'}">${r[TF.result]?'W':'L'}</span></td><td>${tlink(r[TF.opponent],r[TF.oi])}</td><td>${r[TF.side]}</td><td>${r[TF.minutes]==null?'—':r[TF.minutes].toFixed(1)}</td><td>${r[TF.kills]??'—'}-${r[TF.deaths]??'—'}</td><td>${r[TF.gd15]==null?'—':Math.round(r[TF.gd15])}</td><td>${r[TF.dragons]??'—'} / ${r[TF.barons]??'—'} / ${r[TF.towers]??'—'}</td><td>${Math.round(r[TF.elo_after])}${Math.round(dx)?` <span class="${dx>0?'good':'bad'} sm">${dx>0?'+':''}${Math.round(dx)}</span>`:''}</td><td>${elink(g,ev(r))}${fin.has(g)?` · <b>title</b> <span class="mut sm">(+${fin.get(g)} included)</span>`:''}</td></tr>`}).join('')}</table></div>
   ${!st.tpg&&rec.length>20?`<button class="more" id="mg">Show all ${rec.length}</button>`:''}`;
   bar();wireSearch();wireCab();
   eloChart(document.getElementById('elo'),gs);
   const mg=document.getElementById('mg');if(mg)mg.onclick=()=>{st.tpg=1;teamPage(t)};
+  const msb=document.getElementById('ms');if(msb)msb.onclick=()=>{st.tms=1;teamPage(t)};
 }
 
 // tournaments list: grouped like the league dropdown, newest first
@@ -804,7 +871,7 @@ function tourPage(e){
   const bo=s=>s.wa==s.wb?'unfinished':'Bo'+(2*s.wa-1);
   const stageOf=x=>stages.find(g=>inStage(g,x.r0));
   const history=()=>{const days=[...new Set(series.map(x=>x.date))].sort().reverse(),open=st.eopen.h,showD=open?days:days.slice(0,5),many=stages.length>1;
-    return`<div class="tw"><table class="lbt">${showD.map(d=>`<tr class="subh"><th colspan="${many?3:2}">${dm(d)}</th></tr>`+series.filter(x=>x.date==d).sort((a,b)=>b.id-a.id).map(x=>`<tr${x.id==e.final?' class="fin"':''}><td class="pl">${tlink(x.nm[x.a],x.a)} ${mlink(mhref(e.k,x.id),`<b>${x.wa}–${x.wb}</b>`)} ${tlink(x.nm[x.b],x.b)}${x.id==e.final?' <span class="tag">Final</span>':''}</td><td class="mut">${bo(x)}</td>${many?`<td class="mut hm">${esc((stageOf(x)||{}).name||'')}</td>`:''}</tr>`).join('')).join('')}</table></div>
+    return`<div class="tw"><table class="lbt">${showD.map(d=>`<tr class="subh"><th colspan="${many?3:2}">${dm(d)}</th></tr>`+series.filter(x=>x.date==d).sort((a,b)=>b.id-a.id).map(x=>`<tr${x.id==e.final?' class="fin"':''}${mhref(e.k,x.id)?` data-href="${mhref(e.k,x.id)}"`:''}><td class="pl">${tlink(x.nm[x.a],x.a)} ${mlink(mhref(e.k,x.id),`<b>${x.wa}–${x.wb}</b>`)} ${tlink(x.nm[x.b],x.b)}${x.id==e.final?' <span class="tag">Final</span>':''}</td><td class="mut">${bo(x)}</td>${many?`<td class="mut hm">${esc((stageOf(x)||{}).name||'')}</td>`:''}</tr>`).join('')).join('')}</table></div>
     ${!open&&days.length>5?`<button class="more" data-open="h">Show all ${days.length} days</button>`:''}`};
   // a bracket stage without the final: its teams, marking those that went on to the next stage
   const stageTeams=g=>{const ts=[...new Set(g.rows.map(r=>r[TF.ti]))],nm={};g.rows.forEach(r=>nm[r[TF.ti]]=r[TF.team]);
@@ -920,6 +987,17 @@ function tourPage(e){
 }
 
 // a series: result, Elo, games, players; the filter shows the whole series or one game
+// one player's game: the rating parts in words and the stats against the role average; for laners what the lane
+// matchup and the champion usually give (averages from the data, not weights)
+function gameDetail(g){
+  const role=g[F.role],b=basisOf([g]),A=b&&((AVG[b.y]||{})[b.b]||{})[role]||{},x=k=>g.st&&SX[k]!=null?g.st[SX[k]]:null;
+  const notes=[];
+  if(x('exp_gd15')!=null&&g[F.gd15]!=null)notes.push(`Gold lead at 15: ${sfmt('sgn',g[F.gd15])}; usual for ${esc(g[F.champion])} in this lane matchup: ${sfmt('sgn',x('exp_gd15'))}.`);
+  if(x('dmg_off')!=null&&A.dmg&&x('dmg')!=null)notes.push(`Share of the team’s damage: ${sfmt('pct',x('dmg'))}; usual for ${esc(g[F.champion])} as ${esc((RL[role]||role).toLowerCase())}: ${sfmt('pct',A.dmg[0]+x('dmg_off'))}.`);
+  return`<div class="gdet"><div>${partsBlock([g])}${notes.length?`<p class="sm">${notes.join('<br>')}</p>`:''}
+    <p class="mut sm">The rating compares this game with the ${esc((RL[role]||role).toLowerCase())}s in ${b?esc(baseName(b.b,b.y)):'the league'}, taking the champion and the lane matchup into account.</p></div>
+    <div>${statsTable([g],role,b,1)}</div></div>`;
+}
 function matchPage(s,pf){
   const R=s.rows,r0=R[0],A=r0[TF.ti],B=r0[TF.oi],gns=[...new Set(R.map(r=>r[TF.gn]))].sort((a,b)=>a-b);
   const nm={},w={[A]:0,[B]:0};for(const r of R){nm[r[TF.ti]]=r[TF.team];w[r[TF.ti]]+=r[TF.result]}
@@ -958,11 +1036,11 @@ function matchPage(s,pf){
     const ps=[...by.entries()].sort((a,b)=>roleOrd.indexOf(a[1][0][F.role])-roleOrd.indexOf(b[1][0][F.role]));
     if(!ps.length)return`<p class="mut">No player stats for ${esc(nm[ti])} in the data for ${one?'this game':'this series'} (partial data).</p>`;
     return`<div class="tw"><table class="mpt"><tr><th>Role</th><th>Player</th><th>${one?'Champion':'Champions'}</th>${one?'':'<th>Games</th>'}<th>K/D/A</th><th class="hm">CS</th><th class="hm">DPM</th><th class="hm">Vision/min</th><th class="hm">GD@15</th>${one?'<th class="hm">Early</th><th class="hm">Late</th>':''}<th>Rating</th></tr>
-    ${ps.map(([pi,rs])=>{const rt=avg(rs,F.r_overall);return`<tr><td class="mut">${RL[rs[0][F.role]]||esc(rs[0][F.role])}</td><td class="pl">${pl(pi)}${pi==best?' <span class="tag">Top rating</span>':''}</td><td class="pl">${one?champ(rs[0][F.champion]):rs.map(r=>champI(r[F.champion])).join(' ')}</td>${one?'':`<td>${rs.length}</td>`}
+    ${ps.map(([pi,rs])=>{const rt=avg(rs,F.r_overall),dx=one&&rs[0].st;return`<tr${dx?` class="xr" tabindex="0" aria-expanded="false" title="Show the stats behind this rating"`:''}><td class="mut">${dx?'<span class="xa">▸</span> ':''}${RL[rs[0][F.role]]||esc(rs[0][F.role])}</td><td class="pl">${pl(pi)}${pi==best?' <span class="tag">Top rating</span>':''}</td><td class="pl">${one?champ(rs[0][F.champion]):rs.map(r=>champI(r[F.champion])).join(' ')}</td>${one?'':`<td>${rs.length}</td>`}
       <td>${sum(rs,F.kills)}/${sum(rs,F.deaths)}/${sum(rs,F.assists)}</td><td class="hm">${sg(avg(rs,F.cs))}</td><td class="hm">${sg(avg(rs,F.dpm))}</td><td class="hm">${f2(avg(rs,F.vspm))}</td><td class="hm">${sg(avg(rs,F.gd15),1)}</td>
-      ${one?`<td class="hm">${f2(rs[0][F.r_early])}</td><td class="hm">${f2(rs[0][F.r_late])}</td>`:''}<td class="${rc(rt)}"><b>${f2(rt)}</b></td></tr>`}).join('')}</table></div>`};
+      ${one?`<td class="hm">${f2(rs[0][F.r_early])}</td><td class="hm">${f2(rs[0][F.r_late])}</td>`:''}<td class="${rc(rt)}"><b>${f2(rt)}</b></td></tr>${dx?`<tr class="xd" hidden><td colspan="11">${gameDetail(rs[0])}</td></tr>`:''}`}).join('')}</table></div>`};
   const players=`<h2>Players</h2>${[A,B].map(ti=>`<h3 class="mth">${tlink(nm[ti],ti)}</h3>${ptable(ti,sel!='all')}`).join('')}
-    <p class="mut sm">${sel=='all'?'Rating: average of the player’s game ratings in this series; CS, DPM, vision and GD@15 are averages per game, K/D/A totals. ':''}Performance ratings relative to the games counted, not a measure of skill. Top rating: the highest rating shown here, not an official award.</p>`;
+    <p class="mut sm">${sel!='all'&&P.some(r=>r.st)?'Click a player to see the stats behind their rating. ':sel=='all'&&P.some(r=>r.st)?'Pick a game above to see the stats behind each rating. ':''}${sel=='all'?'Rating: average of the player’s game ratings in this series; CS, DPM, vision and GD@15 are averages per game, K/D/A totals. ':''}Performance ratings relative to the games counted, not a measure of skill. Top rating: the highest rating shown here, not an official award.</p>`;
 
   let body;
   if(sel=='all'){
@@ -996,7 +1074,7 @@ function matchPage(s,pf){
 let nav=0;
 async function route(){
   const h=location.hash.slice(1),my=++nav;
-  st.pg=st.tpg=0;
+  st.pg=st.tpg=st.tms=0;
   st.eopen={};st.estage='all';
   // player and team pages: the latest year they played, unless a split is carried over from a leaderboard (then
   // that split's year); set once the games are loaded
@@ -1026,6 +1104,7 @@ async function route(){
     if(!k){app.innerHTML=header('events')+nf;wireSearch();return}
     app.innerHTML='<p class="mut">Loading…</p>';
     let gs,pf;try{[gs,pf]=await Promise.all([loadTeamFile(k),D.files[k]?loadFile(k):null])}catch(err){if(my==nav)app.innerHTML='<p>Could not load this match. <a href="#home">Back to the main page</a></p>';return}
+    await ensureYears([mt[2]]).catch(()=>{});
     if(my!=nav)return;
     const m=[...seriesOf(k,gs).values()],d=mt[2]+'-'+mt[3];
     const s=m.find(x=>x.slug==hb)||m.find(x=>x.pair==mt[4]&&x.rows.some(r=>r[TF.date]==d));
@@ -1045,5 +1124,11 @@ async function route(){
 // a breadcrumb back to a leaderboard opens it on that league (and role and year)
 document.addEventListener('click',ev=>{const a=ev.target.closest&&ev.target.closest('a[data-lg]');if(!a)return;
   st.lg=a.dataset.lg;st.role=a.dataset.role||'all';st.split=st.stage='all';if(a.dataset.yr)st.year=a.dataset.yr;st.all=st.tall=0});
+// match page: a player row opens its stats below it
+const xToggle=tr=>{const d=tr.nextElementSibling;if(!d||!d.classList.contains('xd'))return;d.hidden=!d.hidden;tr.setAttribute('aria-expanded',String(!d.hidden));tr.classList.toggle('open',!d.hidden)};
+document.addEventListener('click',ev=>{const tr=ev.target.closest&&ev.target.closest('tr.xr');if(tr&&!ev.target.closest('a'))xToggle(tr)});
+document.addEventListener('keydown',ev=>{if((ev.key=='Enter'||ev.key==' ')&&ev.target.matches&&ev.target.matches('tr.xr')){ev.preventDefault();xToggle(ev.target)}});
+document.addEventListener('click',ev=>{const tr=ev.target.closest&&ev.target.closest('tr[data-href]');
+  if(!tr||ev.target.closest('a,button,select,input,label')||(getSelection&&String(getSelection())))return;location.hash=tr.dataset.href.slice(1)});
 window.addEventListener('hashchange',route);route();
 })();
